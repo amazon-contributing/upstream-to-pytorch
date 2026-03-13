@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import sys
 import unittest
 from functools import partial, wraps

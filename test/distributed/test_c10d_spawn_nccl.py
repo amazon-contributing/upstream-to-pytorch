@@ -1,8 +1,9 @@
+# Owner(s): ["oncall: distributed"]
+
 from test_c10d_spawn import _torch_dist_nn_available, TestDistributedNNFunctions
 
 import torch
 import torch.distributed as c10d
-import torch.distributed as dist
 from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
@@ -18,7 +19,7 @@ DEVICE_TYPE = (
     if (acc := torch.accelerator.current_accelerator(check_available=True))
     else "cpu"
 )
-BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
+BACKEND = c10d.get_default_backend_for_device(DEVICE_TYPE)
 
 def _local_device_idx(rank):
     return rank % torch.accelerator.device_count()
@@ -88,6 +89,8 @@ if not TEST_WITH_DEV_DBG_ASAN:
         )
         def test_reduce_scatter(self):
             store = c10d.FileStore(self.file_name, self.world_size)
+            # This is required because these functions calls directly to the .dist and needs
+            # the world to be initialized
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend=BACKEND
             )
@@ -118,6 +121,8 @@ if not TEST_WITH_DEV_DBG_ASAN:
         )
         def test_reduce_scatter_non_contiguous(self):
             store = c10d.FileStore(self.file_name, self.world_size)
+            # This is required because these functions calls directly to the .dist and needs
+            # the world to be initialized
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend=BACKEND
             )
@@ -147,10 +152,12 @@ if not TEST_WITH_DEV_DBG_ASAN:
         )
         def test_all_reduce_non_contiguous(self):
             store = c10d.FileStore(self.file_name, self.world_size)
+            # This is required because these functions calls directly to the .dist and needs
+            # the world to be initialized
             c10d.init_process_group(
                 store=store, rank=self.rank, world_size=self.world_size, backend=BACKEND
             )
-            device = torch.device(f"{DEVICE_TYPE}:{_local_device_idx(self.rank)}")
+            device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
 
             class NonContiguousGrad(torch.autograd.Function):
                 @staticmethod
@@ -177,7 +184,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 store=store, rank=self.rank, world_size=self.world_size, backend=BACKEND
             )
 
-            device = torch.device(f"{DEVICE_TYPE}:{_local_device_idx(self.rank)}")
+            device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
             x = torch.ones(5, 5, device=device) + self.rank
             x.requires_grad = True
 

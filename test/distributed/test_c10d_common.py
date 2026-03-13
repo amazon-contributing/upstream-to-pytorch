@@ -368,7 +368,7 @@ class CommonDistributedDataParallelTest:
         gradient_as_bucket_view=False,
     ):
         model = Net()
-        device = devices[0] if devices else torch.device(f"{device_type}:{self.rank % torch.accelerator.device_count():d}")
+        device = devices[0] if devices else torch.device(f"{device_type}:{self.rank:d}")
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,
@@ -1897,7 +1897,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "6789"
         dist.init_process_group(
-            backend=BACKEND, rank=self.rank, world_size=self.world_size
+            "cpu:dummy,cuda:dummy,xpu:dummy", rank=self.rank, world_size=self.world_size
         )
 
         # test all_gather
@@ -2052,7 +2052,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
     def test_init_process_group_optional_backend(self):
         store = dist.FileStore(self.file_name, self.world_size)
         # creates both gloo and nccl backend
-        if dist.is_gloo_available() and (dist.is_nccl_available() or dist.is_backend_available(BACKEND)):
+        if dist.is_gloo_available() and (dist.is_nccl_available()):
             dist.init_process_group(
                 store=store,
                 rank=self.rank,

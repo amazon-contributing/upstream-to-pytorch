@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 from datetime import timedelta
 from multiprocessing.pool import ThreadPool
 

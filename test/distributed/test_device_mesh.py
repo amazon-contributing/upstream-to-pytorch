@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: distributed"]
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 import os
