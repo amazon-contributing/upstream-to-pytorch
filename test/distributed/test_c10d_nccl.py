@@ -58,7 +58,6 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     requires_world_size,
     skip_if_lt_x_gpu,
-    skip_if_rocm_multiprocess,
     sm_is_or_higher_than,
     TEST_SKIPS,
     with_dist_debug_levels,
