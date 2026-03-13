@@ -2052,7 +2052,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
     def test_init_process_group_optional_backend(self):
         store = dist.FileStore(self.file_name, self.world_size)
         # creates both gloo and nccl backend
-        if dist.is_gloo_available() and (dist.is_nccl_available()):
+        if dist.is_gloo_available() and dist.is_nccl_available():
             dist.init_process_group(
                 store=store,
                 rank=self.rank,
@@ -2073,7 +2073,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                 if not dist.is_nccl_available():
                     continue
             elif backend == dist.Backend.GLOO:
-                if not dist.is_gloo_available():
+                if not dist.is_gloo_available() or not torch.cuda.is_available():
                     continue
             elif backend == dist.Backend.UCC:
                 if not dist.is_ucc_available():
