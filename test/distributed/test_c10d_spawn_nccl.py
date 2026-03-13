@@ -1,17 +1,3 @@
-import sys, os
-def _find_repo_root(d):
-    while d != os.path.dirname(d):
-        if os.path.exists(os.path.join(d, "setup.cfg")):
-            return d
-        d = os.path.dirname(d)
-sys.path.insert(0, "/shared/kingrj/dtensor_feb/TorchNeuronEager/tests/pytorch_tests_native")
-import neuron_test_setup
-_overlay = os.environ.get("TORCH_TESTING_INTERNAL_PATH")
-if _overlay:
-    import torch.testing._internal as _internal
-    if _overlay not in _internal.__path__:
-        _internal.__path__.insert(0, _overlay)
-    import torch_neuronx  # noqa: F401
 # Owner(s): ["oncall: distributed"]
 
 from test_c10d_spawn import _torch_dist_nn_available, TestDistributedNNFunctions
