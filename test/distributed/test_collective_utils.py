@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 from unittest import mock
 
 import torch

@@ -1,5 +1,5 @@
-# Owner(s): ["oncall: distributed"]
 # Copyright (c) Meta Platforms, Inc. and affiliates
+# Owner(s): ["oncall: distributed"]
 import functools
 import os
 import unittest

@@ -24,7 +24,7 @@ BACKEND = c10d.get_default_backend_for_device(DEVICE_TYPE)
 def _local_device_idx(rank):
     return rank % torch.accelerator.device_count()
 
-NO_BACKEND = not c10d.is_backend_available(BACKEND)
+NO_NCCL = not hasattr(c10d, "ProcessGroupNCCL")
 
 # Fails on Python-3.9, see https://github.com/pytorch/pytorch/issues/51619
 
