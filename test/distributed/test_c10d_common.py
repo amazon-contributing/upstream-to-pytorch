@@ -2070,10 +2070,10 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                 if not dist.is_mpi_available():
                     continue
             elif backend == dist.Backend.NCCL:
-                if not dist.is_nccl_available():
+                if not dist.is_nccl_available() or not torch.cuda.is_available():
                     continue
             elif backend == dist.Backend.GLOO:
-                if not dist.is_gloo_available() or not torch.cuda.is_available():
+                if not dist.is_gloo_available():
                     continue
             elif backend == dist.Backend.UCC:
                 if not dist.is_ucc_available():

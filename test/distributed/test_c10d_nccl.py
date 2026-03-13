@@ -188,7 +188,6 @@ class RendezvousEnvTest(TestCase):
             with self.assertRaisesRegex(ValueError, "WORLD_SIZE expected"):
                 gen = c10d.rendezvous("env://")
                 next(gen)
-            # Changed to use BACKEND constant from line 108
             c10d.init_process_group(backend=BACKEND, world_size=1)
             self.assertEqual(c10d.get_rank(), 0)
             self.assertEqual(c10d.get_world_size(), 1)
@@ -280,6 +279,7 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
         ):
             c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
+
 class ProcessGroupNCCLInitTest(MultiProcessTestCase):
     device_type = "cuda"
 
@@ -329,6 +329,7 @@ class ProcessGroupNCCLInitTest(MultiProcessTestCase):
         x = torch.empty(1, device=self.device)
         c10d.all_reduce(x)
         os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "0"
+
 
 class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
     def _create_process_group_nccl(self, store, opts, device_id=None):
@@ -5466,7 +5467,10 @@ class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
 
     def setUp(self):
         super().setUp()
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # self.num_gpus = torch.cuda.device_count()
         self._spawn_processes()
 
     def tearDown(self):
@@ -6544,7 +6548,7 @@ def check_if_test_is_skipped(fn):
 
     return wrapper
 
-#TODO: Check for device agnostic ability test by test
+
 class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
     timeout_sec = 1
 
@@ -6682,7 +6686,6 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
                 time.sleep(600)
 
 
-
 @skip_but_pass_in_sandcastle
 class NcclErrorDumpTest(NCCLTraceTestBase):
     def _wait_process(self, rank, timeout):
@@ -6737,7 +6740,6 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
             # Clean up structures (ex: files for FileStore before going down)
             del process_group
             sys.exit(1)
-
 
 
 # tests that needs to be run with a larger world size
