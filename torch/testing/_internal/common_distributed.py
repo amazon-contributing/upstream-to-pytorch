@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     TEST_CUDA,
     TEST_HPU,
+    TEST_PRIVATEUSE1,
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TEST_XPU,
@@ -57,19 +58,32 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
     ProcessLocalGroup,
 )
 
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 ACCELERATOR_DIST_BACKENDS = ["nccl", "xccl", "hccl"]
 DDP_RANK_DEVICES = ["cuda", "xpu"]
-HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU
+HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1
+
+# Hooks called in the parent process before workers are spawned.
+_test_env_setup_hooks: list[Callable[[], None]] = []
+# Hooks called in each child worker process with (rank,) before the test runs.
+_worker_env_setup_hooks: list[Callable[[int], None]] = []
+
+
+def register_test_env_setup_hook(fn: Callable[[], None]) -> None:
+    """Register a hook called in the parent process before workers spawn."""
+    _test_env_setup_hooks.append(fn)
+
+
+def register_worker_env_setup_hook(fn: Callable[[int], None]) -> None:
+    """Register a hook called with (rank) in each spawned worker process."""
+    _worker_env_setup_hooks.append(fn)
 
 
 class TestSkip(NamedTuple):
     exit_code: int
     message: str
-
 
 TEST_SKIPS = {
     "backend_unavailable": TestSkip(
@@ -118,18 +132,17 @@ class DistTestCases:
     if TEST_XPU:
         backend_feature["xpu"] = {"xccl"}
 
-
 def requires_ddp_rank(device):
     return device in DDP_RANK_DEVICES
 
 
 def skip_if_no_gpu(func):
-    """Skips if the world size exceeds the number of GPUs, ensuring that if the
-    test is run, each rank has its own GPU via ``torch.cuda.device(rank)``."""
+    """Skips if the world size exceeds the number of Devices, ensuring that if the
+    test is run, each rank has its own device via ``torch.cuda.device(rank) or torch.accelerator.device_index(rank)``."""
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if not (TEST_CUDA or TEST_HPU or TEST_XPU):
+        if not (TEST_CUDA or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1):
             sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         world_size = int(os.environ["WORLD_SIZE"])
         if TEST_CUDA and torch.cuda.device_count() < world_size:
@@ -137,6 +150,8 @@ def skip_if_no_gpu(func):
         if TEST_HPU and torch.hpu.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
         if TEST_XPU and torch.xpu.device_count() < world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+        if TEST_PRIVATEUSE1 and torch.accelerator.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
 
         return func(*args, **kwargs)
@@ -209,7 +224,8 @@ def at_least_x_gpu(x):
         return True
     if TEST_XPU and torch.xpu.device_count() >= x:
         return True
-    return False
+
+    return torch.accelerator.is_available() and torch.accelerator.device_count() >= x
 
 
 def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
@@ -462,7 +478,7 @@ def requires_accelerator_dist_backend(backends=None):
     """
     if backends is None:
         backends = ACCELERATOR_DIST_BACKENDS
-    
+
     _backend_availability_checks = {
         "nccl": c10d.is_nccl_available,
         "xccl": c10d.is_xccl_available,
@@ -704,6 +720,8 @@ def init_multigpu_helper(world_size: int, backend: str):
         nGPUs = torch.hpu.device_count()
     if TEST_XPU:
         nGPUs = torch.xpu.device_count()
+    if not (TEST_CUDA or TEST_HPU or TEST_XPU):
+        nGPUs = torch.accelerator.device_count()
     visible_devices = range(nGPUs)
 
     # If rank is less than or equal to number of available GPU's
@@ -719,7 +737,6 @@ def init_multigpu_helper(world_size: int, backend: str):
 
 
 tmp_dir: tempfile.TemporaryDirectory | None = None
-
 
 def initialize_temp_directories(init_method: str | None = None) -> None:
     global tmp_dir
@@ -821,6 +838,8 @@ class MultiProcessTestCase(TestCase):
 
     def setUp(self) -> None:
         super().setUp()
+        for hook in _test_env_setup_hooks:
+            hook(world_size=self.world_size)
 
         # Used for tests that are expected to return a non-0 exit code, such as
         # SIGABRT thrown by watchdog.
@@ -916,10 +935,13 @@ class MultiProcessTestCase(TestCase):
             if signal_pipe in ready_pipes:
                 return
 
+
     @classmethod
     def _run(
         cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs
     ) -> None:
+        for hook in _worker_env_setup_hooks:
+            hook(rank)
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -1376,6 +1398,8 @@ class MultiThreadedTestCase(TestCase):
         in the spawned threads, use perThreadSetUp
         """
         super().setUp()
+        # for hook in _test_env_setup_hooks:
+        #     hook(world_size=self.world_size)
         self.rank = self.MAIN_THREAD_RANK
         self.threads = []
         # Show full C++ stacktraces when a Python error originating from C++ is raised.
@@ -1680,6 +1704,8 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
         cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs
     ) -> None:
         trace_log.addHandler(logging.NullHandler())
+        for hook in _worker_env_setup_hooks:
+            hook(rank)
 
         # The rest is copypasta from MultiProcessTestCase._run
         self = cls(test_name)
@@ -1766,6 +1792,7 @@ class MultiProcContinuousTest(TestCase):
         # Run the test function
         test_fn(**kwargs)
 
+
     @classmethod
     def _worker_loop(cls, rank, world_size, rdvz_file, task_queue, completion_queue):
         raised_exception = False
@@ -1792,6 +1819,10 @@ class MultiProcContinuousTest(TestCase):
                 init_skip_reason = skip_entry.message
             else:
                 raise
+
+        # Allow accelerator backends to configure per-worker environment
+        for hook in _worker_env_setup_hooks:
+            hook(rank)
 
         # End of bootstrap
         logger.debug("Setup complete")
@@ -1999,6 +2030,9 @@ class MultiProcContinuousTest(TestCase):
 
         # Ensure processes are spawned (lazy initialization for instantiate_device_type_tests)
         self.__class__._ensure_processes_spawned()
+
+        for hook in _test_env_setup_hooks:
+            hook(world_size=self.world_size)
 
         # I am the dispatcher
         self.rank = self.MAIN_PROCESS_RANK

@@ -1,5 +1,3 @@
-# Owner(s): ["oncall: distributed"]
-
 import sys
 from functools import partial, wraps
 
