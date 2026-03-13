@@ -4490,7 +4490,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                 output = torch.zeros(60 * self.world_size, device=device)
                 torch.distributed.all_gather_into_tensor(output, t)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @runOnRocmArch(MI300_ARCH)
     def test_intra_node_comm_all_reduce(self):
@@ -4509,64 +4509,64 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         os.environ["ENABLE_INTRA_NODE_COMM"] = "1"
         os.environ["TEST_INTRA_NODE_COMM"] = "1"
-        torch.accelerator.set_device_index(self.rank)
+        torch.cuda.set_device(self.rank)
         c10d.init_process_group(
-            backend=BACKEND, rank=self.rank, world_size=self.world_size, store=store
+            backend="nccl", rank=self.rank, world_size=self.world_size, store=store
         )
         expect = self.world_size * (self.world_size - 1) // 2
 
         # IntraNodeComm currently only supports sum and bf16.
         # Verify that it is not used in the next two configurations.
-        t = torch.full((4 * 1024 // 2,), self.rank).to(DEVICE_TYPE)
+        t = torch.full((4 * 1024 // 2,), self.rank).cuda()
         c10d.all_reduce(t, c10d.ReduceOp.SUM)
         self.assertTrue(t.eq(expect).all())
         self.assertEqual(_get_intra_node_comm_usage_counter(), 0)
 
-        t = torch.full((4 * 1024 // 2,), self.rank, dtype=torch.bfloat16).to(DEVICE_TYPE)
+        t = torch.full((4 * 1024 // 2,), self.rank, dtype=torch.bfloat16).cuda()
         c10d.all_reduce(t, c10d.ReduceOp.AVG)
         self.assertEqual(_get_intra_node_comm_usage_counter(), 0)
 
         # Verify that IntraNodeComm is used up to 10MB
-        t = torch.full((4 * 1024 // 2,), self.rank, dtype=torch.bfloat16).to(DEVICE_TYPE)
+        t = torch.full((4 * 1024 // 2,), self.rank, dtype=torch.bfloat16).cuda()
         c10d.all_reduce(t, c10d.ReduceOp.SUM)
         self.assertTrue(t.eq(expect).all())
         self.assertEqual(_get_intra_node_comm_usage_counter(), 1)
 
-        t = torch.full((512 * 1024 // 2,), self.rank, dtype=torch.bfloat16).to(DEVICE_TYPE)
+        t = torch.full((512 * 1024 // 2,), self.rank, dtype=torch.bfloat16).cuda()
         c10d.all_reduce(t, c10d.ReduceOp.SUM)
         self.assertTrue(t.eq(expect).all())
         self.assertEqual(_get_intra_node_comm_usage_counter(), 2)
 
-        t = torch.full((10 * 1024**2 // 2,), self.rank, dtype=torch.bfloat16).to(DEVICE_TYPE)
+        t = torch.full((10 * 1024**2 // 2,), self.rank, dtype=torch.bfloat16).cuda()
         c10d.all_reduce(t, c10d.ReduceOp.SUM)
         self.assertTrue(t.eq(expect).all())
         self.assertEqual(_get_intra_node_comm_usage_counter(), 3)
 
         # Verify that IntraNodeComm is not used beyond 10MB
-        t = torch.full((10 * 1024**2 // 2 + 1,), self.rank, dtype=torch.bfloat16).to(DEVICE_TYPE)
+        t = torch.full((10 * 1024**2 // 2 + 1,), self.rank, dtype=torch.bfloat16).cuda()
         c10d.all_reduce(t, c10d.ReduceOp.SUM)
         self.assertTrue(t.eq(expect).all())
         self.assertEqual(_get_intra_node_comm_usage_counter(), 3)
 
         c10d.destroy_process_group()
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @requires_nccl_version(
         (2, 22), "Need NCCL 2.22+ for configuring estimate comm time"
     )
     @skip_if_lt_x_gpu(2)
     def test_time_estimate_nccl(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        torch.accelerator.set_device_index(self.rank)
+        torch.cuda.set_device(self.rank)
         c10d.init_process_group(
-            backend=BACKEND, store=store, rank=self.rank, world_size=self.world_size
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
         )
         process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
+        device = torch.device(f"cuda:{self.rank:d}")
         t = torch.full(
             (1024,),
             self.rank,
-        ).to(DEVICE_TYPE)
+        ).cuda()
         with dist._time_estimator(group=process_group, device=device) as cm:
             c10d.all_reduce(t, c10d.ReduceOp.SUM)
         self.assertTrue(cm.estimated_time is not None)
