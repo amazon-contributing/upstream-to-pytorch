@@ -58,6 +58,7 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
     ProcessLocalGroup,
 )
 
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -84,6 +85,7 @@ def register_worker_env_setup_hook(fn: Callable[[int], None]) -> None:
 class TestSkip(NamedTuple):
     exit_code: int
     message: str
+
 
 TEST_SKIPS = {
     "backend_unavailable": TestSkip(
@@ -131,6 +133,7 @@ class DistTestCases:
         backend_feature["hpu"] = {"hccl"}
     if TEST_XPU:
         backend_feature["xpu"] = {"xccl"}
+
 
 def requires_ddp_rank(device):
     return device in DDP_RANK_DEVICES
@@ -738,6 +741,7 @@ def init_multigpu_helper(world_size: int, backend: str):
 
 tmp_dir: tempfile.TemporaryDirectory | None = None
 
+
 def initialize_temp_directories(init_method: str | None = None) -> None:
     global tmp_dir
     tmp_dir = tempfile.TemporaryDirectory()
@@ -934,7 +938,6 @@ class MultiProcessTestCase(TestCase):
 
             if signal_pipe in ready_pipes:
                 return
-
 
     @classmethod
     def _run(
@@ -1398,8 +1401,6 @@ class MultiThreadedTestCase(TestCase):
         in the spawned threads, use perThreadSetUp
         """
         super().setUp()
-        # for hook in _test_env_setup_hooks:
-        #     hook(world_size=self.world_size)
         self.rank = self.MAIN_THREAD_RANK
         self.threads = []
         # Show full C++ stacktraces when a Python error originating from C++ is raised.
@@ -1791,7 +1792,6 @@ class MultiProcContinuousTest(TestCase):
 
         # Run the test function
         test_fn(**kwargs)
-
 
     @classmethod
     def _worker_loop(cls, rank, world_size, rdvz_file, task_queue, completion_queue):
