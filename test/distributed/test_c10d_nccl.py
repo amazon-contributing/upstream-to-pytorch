@@ -4875,52 +4875,52 @@ class SetDeviceMethod(Enum):
 class NcclProcessGroupWithDispatchedCollectivesTests(
     test_c10d_common.ProcessGroupWithDispatchedCollectivesTests
 ):
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(1)
     def test_collectives(self):
-        self._test_collectives(backend=BACKEND)
+        self._test_collectives(backend="nccl")
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(1)
     def test_allreduce_coalesced(self):
-        self._test_allreduce_coalesced(backend=BACKEND)
+        self._test_allreduce_coalesced(backend="nccl")
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(1)
     def test_all_to_all_single(self):
-        self._test_all_to_all_single(backend=BACKEND)
+        self._test_all_to_all_single(backend="nccl")
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(1)
     def test_allgather_base(self):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            BACKEND,
+            "nccl",
             world_size=self.world_size,
             rank=self.rank,
             store=store,
         )
-        device = DEVICE_TYPE
+        device = "cuda"
         tensor = torch.ones(10, 10, device=torch.device(device))
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
         dist.all_gather_into_tensor(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(1)
     @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     def test_allgather_float8(self, float8_dtype):
-        device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
+        device = torch.device(f"cuda:{self.rank:d}")
         if not sm_is_or_higher_than(device, 9, 0):  # noqa: F821
             self.skipTest("FP8 reduction support begins with sm90 capable devices")
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            BACKEND,
+            "nccl",
             world_size=self.world_size,
             rank=self.rank,
             store=store,
         )
-        device = DEVICE_TYPE
+        device = "cuda"
         tensor = torch.ones(10, 16, device=torch.device(device)).to(float8_dtype)
         output_tensor = torch.zeros(10, 16, device=torch.device(device)).to(
             float8_dtype
@@ -5480,7 +5480,7 @@ class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
         except OSError:
             pass
 
-    @requires_accelerator_dist_backend()
+    @requires_nccl()
     @skip_if_lt_x_gpu(1)
     def test_reduce_scatter(self):
         """
@@ -5491,11 +5491,11 @@ class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
         https://github.com/pytorch/pytorch/issues/168092
         https://github.com/NVIDIA/nccl/issues/1950
         """
-        device = torch.device(f"{DEVICE_TYPE}:{self.rank}")
+        device = torch.device(f"cuda:{self.rank:d}")
 
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            BACKEND,
+            "nccl",
             world_size=self.world_size,
             rank=self.rank,
             store=store,
