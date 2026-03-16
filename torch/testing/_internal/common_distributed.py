@@ -67,20 +67,18 @@ DDP_RANK_DEVICES = ["cuda", "xpu"]
 HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1
 
 # Hooks called in the parent process before workers are spawned.
-_test_env_setup_hooks: list[Callable[[], None]] = []
+_test_env_setup_hooks: list[Callable[..., None]] = []
 # Hooks called in each child worker process with (rank,) before the test runs.
 _worker_env_setup_hooks: list[Callable[[int], None]] = []
 
 
-def register_test_env_setup_hook(fn: Callable[[], None]) -> None:
+def register_test_env_setup_hook(fn: Callable[..., None]) -> None:
     """Register a hook called in the parent process before workers spawn."""
     _test_env_setup_hooks.append(fn)
-
 
 def register_worker_env_setup_hook(fn: Callable[[int], None]) -> None:
     """Register a hook called with (rank) in each spawned worker process."""
     _worker_env_setup_hooks.append(fn)
-
 
 class TestSkip(NamedTuple):
     exit_code: int
@@ -110,6 +108,14 @@ TEST_SKIPS = {
     ),
     "importerror": TestSkip(88, "Test skipped due to missing import"),
     "no_accelerator": TestSkip(89, "accelerator is not available."),
+    "multi-device-1": TestSkip(90, "Need at least 1 accelerator device"),
+    "multi-device-2": TestSkip(91, "Need at least 2 accelerator devices"),
+    "multi-device-3": TestSkip(92, "Need at least 3 accelerator devices"),
+    "multi-device-4": TestSkip(93, "Need at least 4 accelerator devices"),
+    "multi-device-5": TestSkip(94, "Need at least 5 accelerator devices"),
+    "multi-device-6": TestSkip(95, "Need at least 6 accelerator devices"),
+    "multi-device-7": TestSkip(96, "Need at least 7 accelerator devices"),
+    "multi-device-8": TestSkip(97, "Need at least 8 accelerator devices"),
 }
 
 
@@ -138,11 +144,9 @@ class DistTestCases:
 def requires_ddp_rank(device):
     return device in DDP_RANK_DEVICES
 
-
 def skip_if_no_gpu(func):
-    """Skips if the world size exceeds the number of Devices, ensuring that if the
-    test is run, each rank has its own device via ``torch.cuda.device(rank) or torch.accelerator.device_index(rank)``."""
-
+    """Skips if the world size exceeds the number of GPUs, ensuring that if the
+    test is run, each rank has its own GPU via ``torch.cuda.device(rank)``."""
     @wraps(func)
     def wrapper(*args, **kwargs):
         if not (TEST_CUDA or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1):
@@ -156,6 +160,23 @@ def skip_if_no_gpu(func):
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
         if TEST_PRIVATEUSE1 and torch.accelerator.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def skip_if_no_accelerator(func):
+    """Skips if the world size exceeds the number of devices, ensuring that if the
+    test is run, each rank has its own device via ``torch.accelerator.device_index(rank)``."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not (TEST_PRIVATEUSE1):
+            sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
+        world_size = int(os.environ["WORLD_SIZE"])
+        if TEST_PRIVATEUSE1 and torch.accelerator.device_count() < world_size:
+            sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
 
         return func(*args, **kwargs)
 
@@ -227,8 +248,8 @@ def at_least_x_gpu(x):
         return True
     if TEST_XPU and torch.xpu.device_count() >= x:
         return True
-
     return torch.accelerator.is_available() and torch.accelerator.device_count() >= x
+
 
 
 def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
@@ -250,9 +271,13 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if torch.accelerator.is_available() and torch.accelerator.device_count() >= x:
+            if torch.cuda.is_available() and torch.cuda.device_count() >= x:
                 return func(*args, **kwargs)
-            if allow_cpu and not torch.accelerator.is_available():
+            if TEST_HPU and torch.hpu.device_count() >= x:
+                return func(*args, **kwargs)
+            if TEST_XPU and torch.xpu.device_count() >= x:
+                return func(*args, **kwargs)
+            if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU):
                 return func(*args, **kwargs)
             test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
@@ -1820,7 +1845,6 @@ class MultiProcContinuousTest(TestCase):
             else:
                 raise
 
-        # Allow accelerator backends to configure per-worker environment
         for hook in _worker_env_setup_hooks:
             hook(rank)
 
@@ -2027,6 +2051,8 @@ class MultiProcContinuousTest(TestCase):
         Test fixture. Run before each test.
         """
         super().setUp()
+        for hook in _test_env_setup_hooks:
+            hook(world_size=self.world_size)
 
         # Ensure processes are spawned (lazy initialization for instantiate_device_type_tests)
         self.__class__._ensure_processes_spawned()
