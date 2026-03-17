@@ -277,6 +277,8 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
                 return func(*args, **kwargs)
             if TEST_XPU and torch.xpu.device_count() >= x:
                 return func(*args, **kwargs)
+            if TEST_PRIVATEUSE1 and torch.accelerator.device_count() >= x:
+                return func(*args, **kwargs)
             if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1):
                 return func(*args, **kwargs)
             test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
