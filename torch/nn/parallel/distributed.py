@@ -2405,9 +2405,10 @@ class DistributedDataParallel(Module, Joinable):
             )
 
         if hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook"]:
-            acc = torch.accelerator.current_accelerator()
-            dev = getattr(torch, acc.type, None) if acc else None
-            bf16_support_enabled = dev and getattr(dev, 'is_bf16_supported', lambda: False)()
+            bf16_supported = False
+            if torch.accelerator.is_available():
+                device_module = torch.get_device_module(torch.accelerator.current_accelerator())
+                bf16_supported = getattr(device_module, 'is_bf16_supported', lambda: False)()
 
             cuda_supported = (
                 torch.version.cuda is not None
@@ -2423,7 +2424,7 @@ class DistributedDataParallel(Module, Joinable):
                 and torch.xpu.is_available()
             )
 
-            if not (bf16_support_enabled or (cuda_supported and nccl_supported) or xpu_xccl_supported):
+            if not (bf16_supported or (cuda_supported and nccl_supported) or xpu_xccl_supported):
                 self._log_and_throw(
                     TypeError,
                     "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.10+ or XPU and XCCL",
