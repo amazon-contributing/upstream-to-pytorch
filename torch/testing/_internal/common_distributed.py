@@ -183,6 +183,23 @@ def skip_if_no_accelerator(func):
     return wrapper
 
 
+def skip_if_no_accelerator(func):
+    """Skips if the world size exceeds the number of devices, ensuring that if the
+    test is run, each rank has its own device via ``torch.accelerator.device_index(rank)``."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not (TEST_PRIVATEUSE1):
+            sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
+        world_size = int(os.environ["WORLD_SIZE"])
+        if TEST_PRIVATEUSE1 and torch.accelerator.device_count() < world_size:
+            sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
 # TODO (kwen2501): what is the purpose of this decorator?  Tests with this
 # decorator were always skipped. So they may be outdated already.
 # Oct 2024: bumping the small-world criteria to < 8, as we are increasing the
@@ -508,6 +525,17 @@ def requires_accelerator_dist_backend(backends=None):
     """
     if backends is None:
         backends = ACCELERATOR_DIST_BACKENDS
+    
+    _backend_availability_checks = {
+        "nccl": c10d.is_nccl_available,
+        "xccl": c10d.is_xccl_available,
+        "hccl": lambda: TEST_HPU,
+    }
+
+    def _is_privateuse1_backend_available() -> bool:
+        """Check if a PrivateUse1 backend is registered."""
+        pu1_device = torch._C._get_privateuse1_backend_name()
+        return c10d.Backend.default_device_backend_map.get(pu1_device) is not None
 
     _backend_availability_checks = {
         "nccl": c10d.is_nccl_available,
