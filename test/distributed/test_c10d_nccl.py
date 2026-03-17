@@ -4614,14 +4614,14 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         expected_tensor = torch.tensor([3] * 10).to(torch.device(DEVICE_TYPE, self.rank))
         self.assertEqual(expected_tensor, t)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_pass_nccl_options_high_priority_stream(self):
         pg_opts = c10d.ProcessGroupNCCL.Options()
         pg_opts.is_high_priority_stream = True
         self._test_pass_nccl_options(pg_opts)
 
-    @requires_accelerator_dist_backend()  
+    @requires_nccl()  
     @requires_nccl_version(
         (2, 18), "Need NCCL 2.17+ for configuring NCCL communicators"
     )
