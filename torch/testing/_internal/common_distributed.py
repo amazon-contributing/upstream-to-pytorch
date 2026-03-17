@@ -750,7 +750,7 @@ def init_multigpu_helper(world_size: int, backend: str):
         nGPUs = torch.hpu.device_count()
     if TEST_XPU:
         nGPUs = torch.xpu.device_count()
-    if not (TEST_CUDA or TEST_HPU or TEST_XPU):
+    if TEST_PRIVATEUSE1:
         nGPUs = torch.accelerator.device_count()
     visible_devices = range(nGPUs)
 
