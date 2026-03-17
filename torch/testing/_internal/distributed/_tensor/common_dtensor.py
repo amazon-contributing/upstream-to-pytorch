@@ -832,7 +832,7 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             raise RuntimeError(f"Backend {backend} not supported!")
 
         device_id = None
-        if backend not in ["gloo", "mpi", "fake"]:
+        if "nccl" in backend or "xccl" in backend:
             # set device for nccl pg for collectives
             # TODO: if users want to enable testing across hosts, we may need
             # to change this part.
