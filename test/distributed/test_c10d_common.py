@@ -64,7 +64,12 @@ else:
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
+BACKEND = dist.get_default_backend_for_device(device_type)
 
 
 def devices_for_rank(world_size):
@@ -1394,7 +1399,7 @@ class AbstractCommTest:
             rank=self.rank,
             store=store,
         )
-        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
+        device = device_type
         # test alltoall_base
         tensor = torch.tensor([1, 0, 0, 1], dtype=torch.bool, device=device)
         zeros = torch.tensor([0, 0, 0, 0], dtype=torch.bool, device=device)
@@ -2014,6 +2019,9 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             elif backend == dist.Backend.XCCL:
                 if not dist.is_xccl_available():
                     continue
+            elif backend == dist.Backend.PRIVATEUSE1:
+                if not dist.is_backend_available(str(backend)):
+                    continue
             # Multi-threaded PG is defined as a pure python class.
             # Its pg.name() does not going through Pybind, so its backend name
             # is still "threaded" instead of "custom".
@@ -2044,7 +2052,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import torch
 from torch import distributed as dist
 
-# This should initialize on CPU even though this is a CUDA-enabled build
+# This should initialize on CPU even though this is an accelerator-enabled build
 dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
 """
         try:
@@ -2069,7 +2077,7 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
         # correctly dispatched
 
         # TODO: this will be updated in the future to not be backend specific
-        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
+        device = device_type
         # ensure supported devices (cpu, cuda) succeeds during dispatch call
         tensor = torch.zeros(2, 2, device=torch.device(device))
         # multi tensor collectives
@@ -2121,7 +2129,7 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
             store=store,
         )
         # TODO: this will be updated in the future to not be backend specific
-        device = "cuda" if backend == "nccl" else "cpu"
+        device = device_type
         tensors = [torch.ones(10, 10, device=torch.device(device))]
         dist.all_reduce_coalesced(tensors, dist.ReduceOp.SUM)
         for tensor in tensors:
@@ -2135,7 +2143,7 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
             rank=self.rank,
             store=store,
         )
-        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
+        device = device_type
         # test alltoall_base
         input_tensor = torch.ones(2, 2, device=torch.device(device))
         output_tensor = torch.zeros(2, 2, device=torch.device(device))
