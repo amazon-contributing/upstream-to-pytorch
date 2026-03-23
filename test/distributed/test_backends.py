@@ -1,10 +1,17 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
-
+import torch
 import torch.distributed as dist
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
+BACKEND = dist.get_default_backend_for_device(device_type)
 
 
 """
@@ -23,6 +30,8 @@ class TestMiscCollectiveUtils(TestCase):
             assert dist.get_default_backend_for_device(device) == "gloo"
         elif "hpu" in device:
             assert dist.get_default_backend_for_device(device) == "hccl"
+        elif device_type in device:
+            assert dist.get_default_backend_for_device(device) == BACKEND:
         else:
             with self.assertRaises(ValueError):
                 dist.get_default_backend_for_device(device)
@@ -44,7 +53,7 @@ class TestMiscCollectiveUtils(TestCase):
         dist.destroy_process_group()
 
 
-devices = ["cpu", "cuda", "hpu"]
+devices = ["cpu", "cuda", "hpu", device_type]
 instantiate_device_type_tests(TestMiscCollectiveUtils, globals(), only_for=devices)
 
 if __name__ == "__main__":
