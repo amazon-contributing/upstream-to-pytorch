@@ -42,7 +42,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
         self._spawn_processes()
 
     @property
-    def rank_to_GPU(self):
+    def rank_to_accelerator(self):
         return init_multigpu_helper(self.world_size, BACKEND)
 
     def _init_pg(self):
@@ -58,7 +58,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_empty_tensors(self):
         pg = self._init_pg()
-        local_device_idx = self.rank_to_GPU[self.rank][0]
+        local_device_idx = self.rank_to_accelerator[self.rank][0]
         device = torch.device(DEVICE_TYPE, local_device_idx)
 
         xs = [torch.FloatTensor([]).to(device)]
@@ -95,7 +95,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
 
         for i in range(self.world_size):
             x = torch.tensor([self.rank]).to(
-                torch.device(DEVICE_TYPE, self.rank_to_GPU[self.rank][0])
+                torch.device(DEVICE_TYPE, self.rank_to_accelerator[self.rank][0])
             )
             output = broadcast([x], i, 0)
             self.assertEqual(torch.tensor([i]), output[0])
@@ -105,13 +105,13 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
                 torch.empty([i + 1, i + 1]).fill_(-1).to(
                     torch.device(DEVICE_TYPE, device_idx)
                 )
-                for device_idx in self.rank_to_GPU[self.rank]
+                for device_idx in self.rank_to_accelerator[self.rank]
             ]
 
             for j in range(len(xs)):
                 if self.rank == i:
                     xs[j] = expected_tensor.to(
-                        torch.device(DEVICE_TYPE, self.rank_to_GPU[self.rank][j])
+                        torch.device(DEVICE_TYPE, self.rank_to_accelerator[self.rank][j])
                     )
                 broadcast(xs, i, j)
                 for tensor in xs:
@@ -120,7 +120,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_allreduce_ops(self):
         pg = self._init_pg()
-        local_device_id = self.rank_to_GPU[self.rank][0]
+        local_device_id = self.rank_to_accelerator[self.rank][0]
         device = torch.device(DEVICE_TYPE, local_device_id)
 
         def allreduce(tensors, op):
@@ -153,7 +153,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_reduce_ops(self):
         pg = self._init_pg()
-        local_device_id = self.rank_to_GPU[self.rank][0]
+        local_device_id = self.rank_to_accelerator[self.rank][0]
         device = torch.device(DEVICE_TYPE, local_device_id)
 
         def reduce(xs, rootRank, rootTensor, op=None):
@@ -179,7 +179,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_allgather_ops(self):
         pg = self._init_pg()
-        local_device_ids = self.rank_to_GPU[self.rank]
+        local_device_ids = self.rank_to_accelerator[self.rank]
 
         def allgather(output_ts, input_ts):
             work = pg.allgather(output_ts, input_ts)
@@ -213,7 +213,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_allgather_base_ops(self):
         pg = self._init_pg()
-        local_device_id = self.rank_to_GPU[self.rank][0]
+        local_device_id = self.rank_to_accelerator[self.rank][0]
         device = torch.device(DEVICE_TYPE, local_device_id)
 
         def allgather_base(output_t, input_t):
@@ -228,7 +228,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_gather_ops(self):
         pg = self._init_pg()
-        local_device_ids = self.rank_to_GPU[self.rank]
+        local_device_ids = self.rank_to_accelerator[self.rank]
         num_gpus = len(local_device_ids)
 
         def gather(output_t, input_t, rootRank):
@@ -264,7 +264,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_gather_stress(self):
         pg = self._init_pg()
-        local_device_ids = self.rank_to_GPU[self.rank]
+        local_device_ids = self.rank_to_accelerator[self.rank]
         num_gpus = len(local_device_ids)
 
         def gather(output_t, input_t, rootRank):
@@ -306,7 +306,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_scatter_ops(self):
         pg = self._init_pg()
-        local_device_ids = self.rank_to_GPU[self.rank]
+        local_device_ids = self.rank_to_accelerator[self.rank]
         num_gpus = len(local_device_ids)
 
         def scatter(output_t, input_t, rootRank):
@@ -341,7 +341,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_scatter_stress(self):
         pg = self._init_pg()
-        local_device_ids = self.rank_to_GPU[self.rank]
+        local_device_ids = self.rank_to_accelerator[self.rank]
         num_gpus = len(local_device_ids)
 
         def scatter(output_t, input_t, rootRank):
@@ -382,7 +382,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_reduce_scatter_ops(self):
         pg = self._init_pg()
-        local_device_ids = self.rank_to_GPU[self.rank]
+        local_device_ids = self.rank_to_accelerator[self.rank]
         num_gpus = len(local_device_ids)
 
         def reduce_scatter(outputs, input_lists, op):
@@ -458,7 +458,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_reduce_scatter_base_ops(self):
         pg = self._init_pg()
-        local_device_id = self.rank_to_GPU[self.rank][0]
+        local_device_id = self.rank_to_accelerator[self.rank][0]
         device = torch.device(DEVICE_TYPE, local_device_id)
 
         def reduce_scatter_base(output_t, input_t):
@@ -473,7 +473,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_reduce_scatter_bfloat16(self):
         pg = self._init_pg()
-        device = torch.device(DEVICE_TYPE, self.rank_to_GPU[self.rank][0])
+        device = torch.device(DEVICE_TYPE, self.rank_to_accelerator[self.rank][0])
 
         numel = 1024
         output_tensor = torch.zeros(numel, dtype=torch.float32, device=device).to(
@@ -492,7 +492,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_barrier(self):
         pg = self._init_pg()
-        local_device_ids = self.rank_to_GPU[self.rank]
+        local_device_ids = self.rank_to_accelerator[self.rank]
 
         def allreduce(tensors):
             opts = dist.AllreduceOptions()
@@ -524,7 +524,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_send_recv(self):
         self._init_pg()
-        device = self.rank_to_GPU[self.rank][0]
+        device = self.rank_to_accelerator[self.rank][0]
 
         torch.manual_seed(0)
         send_tensor = torch.rand(10, 10, device=device)
@@ -538,7 +538,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_send_recv_complex(self):
         self._init_pg()
-        device = self.rank_to_GPU[self.rank][0]
+        device = self.rank_to_accelerator[self.rank][0]
 
         torch.manual_seed(0)
         send_tensor = torch.rand(10, 10, dtype=torch.cfloat, device=device)
@@ -552,7 +552,7 @@ class ProcessGroupPrivateUse1OpTest(MultiProcessTestCase):
     @requires_accelerator_dist_backend()
     def test_send_recv_object_list(self):
         self._init_pg()
-        device = self.rank_to_GPU[self.rank][0]
+        device = self.rank_to_accelerator[self.rank][0]
 
         val = 99 if self.rank == 0 else None
         object_list = [val] * self.world_size
