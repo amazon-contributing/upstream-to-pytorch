@@ -225,6 +225,8 @@ def get_unsupported_dtypes_for_device(device_type: str) -> set[torch.dtype]:
         if supported is not None:
             return set(get_all_dtypes(include_complex=True, include_complex32=True)) - supported
     except Exception:
+        # If querying capabilities fails for any reason, treat the device as
+        # having no declared unsupported dtypes and fall back to an empty set.
         pass
     return set()
 
