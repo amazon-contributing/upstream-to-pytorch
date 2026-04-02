@@ -2,6 +2,7 @@
 
 import os
 import pickle
+import unittest
 from io import BytesIO
 from typing import cast
 
@@ -9,11 +10,13 @@ import torch
 import torch.distributed as dist
 from torch.distributed._serialization import _streaming_load, _streaming_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 DEBUG_ENV = "TORCH_SERIALIZATION_DEBUG"
 
+HAS_ACCELERATOR = torch.accelerator.is_available()
+device_type = torch.accelerator.current_accelerator().type
 
 class MyClass:
     def __init__(self, a: int) -> None:
@@ -164,9 +167,9 @@ class TestSerialization(TestCase):
         with self.assertRaisesRegex(RuntimeError, "explicit pickle_module"):
             _streaming_load(file, weights_only=True, pickle_module=pickle)
 
-    @requires_cuda
-    def test_cuda(self) -> None:
-        device = torch.device("cuda:0")
+    @unittest.skipUnless(HAS_ACCELERATOR, "no accelerator available")
+    def test_accelerator(self) -> None:
+        device = torch.device(f"{device_type}:0")
 
         tensor = torch.tensor(42, dtype=torch.float, device=device)
         state_dict = {"scalar": tensor}
