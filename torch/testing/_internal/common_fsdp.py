@@ -85,7 +85,10 @@ elif TEST_PRIVATEUSE1:
     DISTRIBUTED_BACKEND = torch.distributed.get_default_backend_for_device(
         TEST_PRIVATEUSE1_DEVICE_TYPE
     )
-    DEVICE_COUNT = torch.get_device_module(TEST_PRIVATEUSE1_DEVICE_TYPE).device_count()
+    DEVICE_COUNT = min(
+        int(os.environ.get("WORLD_SIZE", "8")),
+        torch.get_device_module(TEST_PRIVATEUSE1_DEVICE_TYPE).device_count(),
+    )
 elif TEST_HPU:
     DEVICE_TYPE = "hpu:0"
     DISTRIBUTED_BACKEND = "hccl"
@@ -97,6 +100,11 @@ else:
     DEVICE_TYPE = "cpu"
     DISTRIBUTED_BACKEND = "gloo"
     DEVICE_COUNT = 1
+
+# Device types supported by FSDP device-type-parameterized tests.
+FSDP_DEVICES = ("cuda", "hpu", "xpu")
+if TEST_PRIVATEUSE1:
+    FSDP_DEVICES = FSDP_DEVICES + (DEVICE_TYPE,)
 
 
 class FSDPInitMode(Enum):
@@ -1180,7 +1188,7 @@ def check_sharded_parity(
         cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
 
-@unittest.skipIf(TEST_XPU, "not-support-multithread")
+@unittest.skipIf(TEST_XPU or TEST_PRIVATEUSE1, "not-support-multithread")
 class FSDPTestMultiThread(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -1266,12 +1274,13 @@ class FSDPTestMixin:
 
         torch._dynamo.reset()
         set_rng_seed()
-        self.run_test(test_name, pipe)
-        torch._dynamo.reset()
-
-        dist.barrier(device_ids=device_ids)
-
-        dist.destroy_process_group()
+        try:
+            self.run_test(test_name, pipe)
+        finally:
+            torch._dynamo.reset()
+            if dist.is_initialized():
+                dist.barrier(device_ids=device_ids)
+                dist.destroy_process_group()
 
     def _train_for_several_steps(
         self,
@@ -1611,12 +1620,13 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
         torch._dynamo.reset()
         set_rng_seed()
-        self.run_test(test_name, pipe)
-        torch._dynamo.reset()
-
-        dist.barrier(device_ids=device_ids)
-
-        dist.destroy_process_group()
+        try:
+            self.run_test(test_name, pipe)
+        finally:
+            torch._dynamo.reset()
+            if dist.is_initialized():
+                dist.barrier(device_ids=device_ids)
+                dist.destroy_process_group()
 
 
 class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
