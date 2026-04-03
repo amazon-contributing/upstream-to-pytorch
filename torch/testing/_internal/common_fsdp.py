@@ -63,6 +63,8 @@ from torch.testing._internal.common_utils import (
     set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
+    TEST_PRIVATEUSE1,
+    TEST_PRIVATEUSE1_DEVICE_TYPE,
     TEST_WITH_ROCM,
     TEST_XPU,
 )
@@ -78,6 +80,10 @@ if TEST_CUDA:
     DEVICE_TYPE = "cuda"
     DISTRIBUTED_BACKEND = "nccl"
     DEVICE_COUNT = torch.cuda.device_count()
+elif TEST_PRIVATEUSE1:
+    DEVICE_TYPE = TEST_PRIVATEUSE1_DEVICE_TYPE
+    DISTRIBUTED_BACKEND = TEST_PRIVATEUSE1_DEVICE_TYPE
+    DEVICE_COUNT = torch.get_device_module(TEST_PRIVATEUSE1_DEVICE_TYPE).device_count()
 elif TEST_HPU:
     DEVICE_TYPE = "hpu:0"
     DISTRIBUTED_BACKEND = "hccl"
@@ -662,10 +668,10 @@ class ModuleWithDelay(FSDPTestModel):
     def get_loss(self, input, output):
         loss = self.module.get_loss(input, output)  # type: ignore[operator]
         if self.delay_after_loss_ms > 0:
-            if TEST_HPU or TEST_XPU:
-                time.sleep(self.delay_after_loss_ms / 1000)
-            elif TEST_CUDA:
+            if TEST_CUDA:
                 torch.cuda._sleep(int(self.delay_after_loss_ms * get_cycles_per_ms()))
+            else:
+                time.sleep(self.delay_after_loss_ms / 1000)
 
         return loss
 
@@ -678,7 +684,7 @@ class ModuleWithDelay(FSDPTestModel):
                     torch.cuda._sleep(
                         int(self.delay_before_reduction_ms * get_cycles_per_ms())
                     )
-                elif TEST_HPU or TEST_XPU:
+                else:
                     time.sleep(self.delay_before_reduction_ms / 1000)
             return orig_reduce_scatter(*args, **kwargs)
 
@@ -811,7 +817,7 @@ class MixtureOfExperts(NestedWrappedModule):
                         torch.cuda._sleep(
                             int(self.delay_before_free_ms * get_cycles_per_ms())
                         )
-                    elif TEST_HPU or TEST_XPU:
+                    else:
                         time.sleep(self.delay_before_free_ms / 1000)
 
                     return orig_reshard(*args, **kwargs)
@@ -1172,7 +1178,7 @@ def check_sharded_parity(
         cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
 
-@unittest.skipIf(TEST_XPU, "not-support-multithread")
+@unittest.skipIf(TEST_XPU or TEST_PRIVATEUSE1, "not-support-multithread")
 class FSDPTestMultiThread(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -1247,7 +1253,7 @@ class FSDPTestMixin:
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
+        if torch.accelerator.is_available():
             torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
@@ -1555,14 +1561,16 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe, **kwargs):  # type: ignore[override]
+
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
         fake_pg = kwargs.get("fake_pg", False)
 
         print(f"dist init r={self.rank}, world={self.world_size}")
-        if torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
+        device_count = torch.accelerator.device_count() if torch.accelerator.is_available() else 0
+        if device_count < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
         # Actual tests will be skipped if there is no enough GPUs.
@@ -1590,7 +1598,7 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
+        if TEST_CUDA or TEST_XPU or TEST_PRIVATEUSE1:
             torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
@@ -1637,7 +1645,7 @@ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
             sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
 
         device_id = rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
+        if torch.accelerator.is_available():
             torch.accelerator.set_device_index(device_id)
 
         super()._init_pg(rank, world_size, rdvz_file)
