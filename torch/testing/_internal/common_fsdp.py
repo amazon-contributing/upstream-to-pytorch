@@ -1761,10 +1761,10 @@ class SkipModel(nn.Module):
         return x
 
 
-if TEST_PRIVATEUSE1:
-    # PrivateUse1 backends may not support multi-threaded test execution.
-    # Fall back to multi-process which tests the same FSDP logic with
-    # process isolation.
+if os.environ.get("PYTORCH_TESTING_PREFER_MULTIPROCESS"):
+    # Some backends may not support multi-threaded test execution.
+    # Setting PYTORCH_TESTING_PREFER_MULTIPROCESS=1 falls back to
+    # multi-process which tests the same FSDP logic with process isolation.
     class FSDPTestMultiThread(FSDPTest):  # type: ignore[no-redef]
         def perThreadSetUp(self):
             pass
