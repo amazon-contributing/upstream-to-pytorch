@@ -6104,19 +6104,17 @@ def get_cycles_per_ms(device: str = "cuda") -> float:
             cycles_per_ms = test_cycles / elapsed_ms if elapsed_ms > 0 else 1000000
             return cycles_per_ms
     else:
+        device_mod = torch.get_device_module(device)
+
         def measure() -> float:
-            if hasattr(torch.get_device_module(device), "_sleep"):
-                start = torch.Event(enable_timing=True)
-                end = torch.Event(enable_timing=True)
-                start.record()
-                torch.get_device_module(device)._sleep(test_cycles)
-                end.record()
-                end.synchronize()
-                cycles_per_ms = test_cycles / start.elapsed_time(end)
-                return cycles_per_ms
-            else:
-                cycles_per_ms = 1000000.0
-                return cycles_per_ms
+            start = device_mod.Event(enable_timing=True)
+            end = device_mod.Event(enable_timing=True)
+            start.record()
+            device_mod._sleep(test_cycles)
+            end.record()
+            end.synchronize()
+            cycles_per_ms = test_cycles / start.elapsed_time(end)
+            return cycles_per_ms
 
     # Get 10 values and remove the 2 max and 2 min and return the avg.
     # This is to avoid system disturbance that skew the results, e.g.
