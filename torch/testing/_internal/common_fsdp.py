@@ -1598,7 +1598,7 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU or TEST_PRIVATEUSE1:
+        if torch.accelerator.is_available():
             torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
