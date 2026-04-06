@@ -82,7 +82,9 @@ if TEST_CUDA:
     DEVICE_COUNT = torch.cuda.device_count()
 elif TEST_PRIVATEUSE1:
     DEVICE_TYPE = TEST_PRIVATEUSE1_DEVICE_TYPE
-    DISTRIBUTED_BACKEND = TEST_PRIVATEUSE1_DEVICE_TYPE
+    DISTRIBUTED_BACKEND = torch.distributed.get_default_backend_for_device(
+        TEST_PRIVATEUSE1_DEVICE_TYPE
+    )
     DEVICE_COUNT = torch.get_device_module(TEST_PRIVATEUSE1_DEVICE_TYPE).device_count()
 elif TEST_HPU:
     DEVICE_TYPE = "hpu:0"
@@ -1178,7 +1180,7 @@ def check_sharded_parity(
         cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
 
-@unittest.skipIf(TEST_XPU or TEST_PRIVATEUSE1, "not-support-multithread")
+@unittest.skipIf(TEST_XPU, "not-support-multithread")
 class FSDPTestMultiThread(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -1757,3 +1759,15 @@ class SkipModel(nn.Module):
         x = self.linear_skip(x)
         x = self.nested_linear(x)
         return x
+
+
+if TEST_PRIVATEUSE1:
+    # PrivateUse1 backends may not support multi-threaded test execution.
+    # Fall back to multi-process which tests the same FSDP logic with
+    # process isolation.
+    class FSDPTestMultiThread(FSDPTest):  # type: ignore[no-redef]
+        def perThreadSetUp(self):
+            pass
+
+        def perThreadTearDown(self):
+            pass
