@@ -1278,8 +1278,9 @@ class FSDPTestMixin:
             self.run_test(test_name, pipe)
         finally:
             torch._dynamo.reset()
-            dist.barrier(device_ids=device_ids)
-            dist.destroy_process_group()
+            if dist.is_initialized():
+                dist.barrier(device_ids=device_ids)
+                dist.destroy_process_group()
 
     def _train_for_several_steps(
         self,
@@ -1623,8 +1624,9 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
             self.run_test(test_name, pipe)
         finally:
             torch._dynamo.reset()
-            dist.barrier(device_ids=device_ids)
-            dist.destroy_process_group()
+            if dist.is_initialized():
+                dist.barrier(device_ids=device_ids)
+                dist.destroy_process_group()
 
 
 class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):

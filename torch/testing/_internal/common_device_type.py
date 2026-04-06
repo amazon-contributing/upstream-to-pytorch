@@ -17,7 +17,6 @@ from typing_extensions import ParamSpec
 
 import torch
 from torch._inductor.utils import GPU_TYPES
-from torch._utils import _is_privateuse1_backend_available
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_hipblaslt_version,
@@ -34,6 +33,7 @@ from torch.testing._internal.common_utils import (
     get_tracked_input,
     IS_FBCODE,
     IS_MACOS,
+    is_privateuse1_backend_available,
     IS_REMOTE_GPU,
     IS_S390X,
     IS_SANDCASTLE,
@@ -733,7 +733,7 @@ def get_device_type_test_bases():
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
 
-        if _is_privateuse1_backend_available():
+        if is_privateuse1_backend_available():
             test_bases.append(PrivateUse1TestBase)
         # Disable MPS testing in generic device testing temporarily while we're
         # ramping up support.
@@ -760,7 +760,7 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     # This handles the case where PrivateUse1TestBase.device_type has been
     # changed from "privateuse1" to the actual backend name (e.g., "openreg")
     # by setUpClass being called during previous instantiate_device_type_tests calls
-    if _is_privateuse1_backend_available():
+    if is_privateuse1_backend_available():
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
 
         def func_replace(x: str) -> str:
@@ -916,10 +916,24 @@ def instantiate_device_type_tests(
         except_for, only_for, include_lazy, allow_mps, allow_xpu
     ):
         class_name = generic_test_class.__name__ + base.device_type.upper()
+        # For PrivateUse1, use the registered backend name so the class name
+        # matches what setUpClass will produce, and set device_type on the
+        # generated class so child processes see the correct device string.
+        pu1_backend_name = None
+        if base.device_type == "privateuse1":
+            backend_name = torch._C._get_privateuse1_backend_name()
+            if backend_name != "privateuseone":
+                class_name = generic_test_class.__name__ + backend_name.upper()
+                pu1_backend_name = backend_name
 
         # type set to Any and suppressed due to unsupported runtime class:
         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
         device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
+
+        # Set device_type on the generated class for PrivateUse1 so child
+        # processes don't need setUpClass to resolve the backend name.
+        if pu1_backend_name is not None:
+            device_type_test_class.device_type = pu1_backend_name
 
         # Arrange for setUpClass and tearDownClass methods defined both in the test template
         # class and in the generic base to be called. This allows device-parameterized test
