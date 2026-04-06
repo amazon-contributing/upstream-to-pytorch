@@ -61,6 +61,8 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
+    skip_but_pass_in_sandcastle_if,
+    TEST_CUDA,
     TEST_WITH_ROCM,
     TEST_XPU,
     xfailIf,
@@ -1625,6 +1627,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
         super()._run(*args, **kwargs)
 
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not TEST_CUDA, "NCCL log parsing requires CUDA")
     # The NCCL PG refuses to allocate tensors if multicast is unavailable, see
     # https://github.com/pytorch/pytorch/blob/503362d019b3782581492af7767945dbd75ca1c9/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp#L5634
     @requires_multicast_support()
@@ -1638,13 +1641,13 @@ class TestFullyShardAllocFromPG(FSDPTest):
         fully_shard(model)
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
 
         loss = model(inp)
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             self.assertNotRegex(f.read(), self.MEMORY_REGISTER_RE)
@@ -1658,7 +1661,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             self.assertRegex(f.read(), self.MEMORY_REGISTER_RE)
@@ -1709,6 +1712,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
 
     # Test reduce-scatter only on plain FSDP on 2 GPUs
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not TEST_CUDA, "NCCL log parsing requires CUDA")
     @unittest.skipIf(
         TEST_XPU, "Related environment variable is not supported with XCCL"
     )
@@ -1732,13 +1736,13 @@ class TestFullyShardForceSumReduction(FSDPTest):
         )
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
 
         loss = model(inp)
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             logs = f.read()
@@ -1755,7 +1759,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             logs = f.read()
@@ -1764,6 +1768,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
 
     # Test both reduce-scatter and all-reduce on HSDP (DDP+FSDP) on 4 GPUs
     @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(not TEST_CUDA, "NCCL log parsing requires CUDA")
     @unittest.skipIf(
         TEST_XPU, "Related environment variable is not supported with XCCL"
     )
@@ -1797,13 +1802,13 @@ class TestFullyShardForceSumReduction(FSDPTest):
         )
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type)
 
         loss = model(inp)
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             logs = f.read()
@@ -1822,7 +1827,7 @@ class TestFullyShardForceSumReduction(FSDPTest):
         loss.sum().backward()
 
         torch.distributed.barrier()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         with open(self.nccl_log_dir.name + "/nccl_log") as f:
             logs = f.read()
