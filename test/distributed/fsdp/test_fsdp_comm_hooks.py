@@ -12,6 +12,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecis
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import (
+    BFLOAT16_AVAILABLE,
     requires_accelerator_dist_backend,
     requires_nccl_version,
     skip_but_pass_in_sandcastle_if,
@@ -32,14 +33,6 @@ if not dist.is_available():
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
-
-def _is_bf16_supported():
-    if torch.accelerator.is_available():
-        device_module = torch.get_device_module(torch.accelerator.current_accelerator())
-        return getattr(device_module, "is_bf16_supported", lambda: False)()
-    return False
-
-BFLOAT16_AVAILABLE = _is_bf16_supported()
 
 
 class Net(nn.Module):
