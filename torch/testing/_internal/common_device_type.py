@@ -17,6 +17,7 @@ from typing_extensions import ParamSpec
 
 import torch
 from torch._inductor.utils import GPU_TYPES
+from torch._utils import _is_privateuse1_backend_available
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_hipblaslt_version,
@@ -24,7 +25,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUSPARSE_GENERIC,
     TEST_HIPSPARSE_GENERIC,
 )
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import get_all_dtypes, get_unsupported_dtypes_for_device
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
     clear_tracked_input,
@@ -33,7 +34,6 @@ from torch.testing._internal.common_utils import (
     get_tracked_input,
     IS_FBCODE,
     IS_MACOS,
-    is_privateuse1_backend_available,
     IS_REMOTE_GPU,
     IS_S390X,
     IS_SANDCASTLE,
@@ -389,7 +389,12 @@ class DeviceTypeTestBase(TestCase):
         if default_dtypes is None:
             raise AssertionError(msg)
 
-        return test.dtypes.get(cls.device_type, default_dtypes)
+        result = test.dtypes.get(cls.device_type, default_dtypes)
+        if result is not None and cls.device_type == "privateuse1":
+            result = result - get_unsupported_dtypes_for_device("privateuse1")
+            if not result:
+                return None
+        return result
 
     def _get_precision_override(self, test, dtype):
         if not hasattr(test, "precision_overrides"):
@@ -550,7 +555,6 @@ class CUDATestBase(DeviceTypeTestBase):
     cudnn_version: ClassVar[Any]
     no_magma: ClassVar[bool]
     no_cudnn: ClassVar[bool]
-    no_hipdnn: ClassVar[bool]
 
     def has_cudnn(self):
         return not self.no_cudnn
@@ -582,9 +586,6 @@ class CUDATestBase(DeviceTypeTestBase):
         # Determines if cuDNN is available and its version
         cls.no_cudnn = not torch.backends.cudnn.is_acceptable(t)
         cls.cudnn_version = None if cls.no_cudnn else torch.backends.cudnn.version()
-
-        # Determines if hipDNN is available
-        cls.no_hipdnn = not torch.backends.hipdnn.is_available()
 
         # Acquires the current device as the primary (test) device
         cls.primary_device = f"cuda:{torch.cuda.current_device()}"
@@ -737,7 +738,7 @@ def get_device_type_test_bases():
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
 
-        if is_privateuse1_backend_available():
+        if _is_privateuse1_backend_available():
             test_bases.append(PrivateUse1TestBase)
         # Disable MPS testing in generic device testing temporarily while we're
         # ramping up support.
@@ -764,7 +765,7 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     # This handles the case where PrivateUse1TestBase.device_type has been
     # changed from "privateuse1" to the actual backend name (e.g., "openreg")
     # by setUpClass being called during previous instantiate_device_type_tests calls
-    if is_privateuse1_backend_available():
+    if _is_privateuse1_backend_available():
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
 
         def func_replace(x: str) -> str:
@@ -2044,16 +2045,6 @@ def skipCUDAIfNoMiopen(fn):
     return skipCUDAIf(torch.version.hip is None, "MIOpen is not available")(
         skipCUDAIfNoCudnn(fn)
     )
-
-
-def skipCUDAIfNoHipdnn(fn):
-    @wraps(fn)
-    def wrap_fn(self, *args, **kwargs):
-        if self.device_type == "cuda" and self.no_hipdnn:
-            raise unittest.SkipTest("hipDNN not available")
-        return fn(self, *args, **kwargs)
-
-    return wrap_fn
 
 
 def skipLazy(fn):
