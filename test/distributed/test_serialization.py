@@ -11,13 +11,20 @@ import torch.distributed as dist
 from torch.distributed._serialization import _streaming_load, _streaming_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.testing._internal.common_utils import run_tests, TestCase
+<<<<<<< HEAD
+=======
+from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
+>>>>>>> df5399080cd (fixing conflicts)
 
 
 DEBUG_ENV = "TORCH_SERIALIZATION_DEBUG"
 
+<<<<<<< HEAD
 HAS_ACCELERATOR = torch.accelerator.is_available()
 device_type = torch.accelerator.current_accelerator().type
 
+=======
+>>>>>>> df5399080cd (fixing conflicts)
 class MyClass:
     def __init__(self, a: int) -> None:
         self.a = a
@@ -167,9 +174,9 @@ class TestSerialization(TestCase):
         with self.assertRaisesRegex(RuntimeError, "explicit pickle_module"):
             _streaming_load(file, weights_only=True, pickle_module=pickle)
 
-    @unittest.skipUnless(HAS_ACCELERATOR, "no accelerator available")
+    @requires_accelerator_dist_backend()
     def test_accelerator(self) -> None:
-        device = torch.device(f"{device_type}:0")
+        device = torch.device(f"{torch.accelerator.current_accelerator().type}:0")
 
         tensor = torch.tensor(42, dtype=torch.float, device=device)
         state_dict = {"scalar": tensor}
