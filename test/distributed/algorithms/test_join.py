@@ -291,7 +291,11 @@ class TestJoin(MultiProcessTestCase):
         num_joinables = 1
         num_allreduces = 1
         run_post_hooks = False
+        # Non-joined processes all-reduce a 1, so this rank's all-reduce total
+        # should be precisely equal to the total number of inputs processed
+        # before it joined
         expected_total = self.world_size * self.base_num_inputs
+        # Rank i runs for i additional iterations
         for num_joined in range(1, self.rank + 1):
             expected_total += (self.world_size - num_joined) * self.offset
 
@@ -327,6 +331,10 @@ class TestJoin(MultiProcessTestCase):
         r"""
         Tests the main hooks and post-hooks of a single :class:`Joinable`
         together.
+
+        This combines ``test_single_joinable_main_hooks()`` and
+        ``test_single_joinable_post_hooks()`` into a single test to ensure that
+        main hooks and post-hooks operate correctly together.
         """
         num_joinables = 1
         num_allreduces = 1
@@ -351,6 +359,9 @@ class TestJoin(MultiProcessTestCase):
         r"""
         Tests the main hooks and post-hooks of multiple :class:`Joinable` s
         together.
+
+        This generalizes ``test_single_joinable()`` to multiple
+        :class:`Joinable` s.
         """
         num_joinables = 3
         num_allreduces = 1
@@ -359,6 +370,7 @@ class TestJoin(MultiProcessTestCase):
         expected_total = self.world_size * self.base_num_inputs
         for num_joined in range(1, self.rank + 1):
             expected_total += (self.world_size - num_joined) * self.offset
+        # The expected total is now multiplied by a factor of `NUM_JOINABLES`
         expected_total *= num_joinables
 
         self._test_join_base(
@@ -396,6 +408,9 @@ class TestJoin(MultiProcessTestCase):
     def test_multiple_joinable_disable(self):
         r"""
         Tests ``enable=False`` for multiple :class:`Joinable` s.
+
+        This generalizes ``test_single_joinable_disable`` to multiple
+        :class:`Joinable` s.
         """
         num_joinables = 3
         num_allreduces = 1
@@ -441,6 +456,9 @@ class TestJoin(MultiProcessTestCase):
         r"""
         Tests ``throw_on_early_termination=True`` for multiple
         :class:`Joinable` s together.
+
+        This generalizes ``test_single_joinable_throw`` to multiple
+        :class:`Joinable` s.
         """
         num_joinables = 3
         num_allreduces = 1
@@ -469,6 +487,7 @@ class TestJoin(MultiProcessTestCase):
         expected_total = self.world_size * self.base_num_inputs
         for num_joined in range(1, self.rank + 1):
             expected_total += (self.world_size - num_joined) * self.offset
+        # The expected total is now multiplied by a factor of `NUM_ALLREDUCES`
         expected_total *= num_allreduces
 
         self._test_join_base(
