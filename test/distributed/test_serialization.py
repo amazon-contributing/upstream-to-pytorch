@@ -11,20 +11,10 @@ import torch.distributed as dist
 from torch.distributed._serialization import _streaming_load, _streaming_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.testing._internal.common_utils import run_tests, TestCase
-<<<<<<< HEAD
-=======
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
->>>>>>> df5399080cd (fixing conflicts)
-
 
 DEBUG_ENV = "TORCH_SERIALIZATION_DEBUG"
 
-<<<<<<< HEAD
-HAS_ACCELERATOR = torch.accelerator.is_available()
-device_type = torch.accelerator.current_accelerator().type
-
-=======
->>>>>>> df5399080cd (fixing conflicts)
 class MyClass:
     def __init__(self, a: int) -> None:
         self.a = a
