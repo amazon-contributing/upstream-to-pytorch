@@ -1,15 +1,22 @@
 # Owner(s): ["oncall: distributed"]
+# Adapted from upstream test_sharder.py — made device-agnostic for PrivateUse1 backends.
+# Uses torch.accelerator to derive DEVICE_TYPE and BACKEND dynamically.
+
 import copy
 import sys
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard import shard_module
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharder import Sharder
 from torch.distributed._shard.sharding_plan import ShardingPlan
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -17,6 +24,12 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
     with_comms,
 )
 
+if torch.accelerator.current_accelerator() is None:
+    print("No accelerator available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
+DEVICE_TYPE = torch.accelerator.current_accelerator().type
+BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -98,9 +111,9 @@ class CustomSharder(Sharder):
 
 
 class TestCustomSharder(ShardedTensorTestBase):
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_custom_sharder(self):
         class MyModule(nn.Module):
             def __init__(self) -> None:
@@ -111,7 +124,7 @@ class TestCustomSharder(ShardedTensorTestBase):
                 return self.ebc(inputs)
 
         custom_sharder = CustomSharder(
-            devices=[f"rank:{i}/cuda:{i}" for i in range(TEST_GPU_NUM)],
+            devices=[f"rank:{i}/{DEVICE_TYPE}:{i}" for i in range(TEST_GPU_NUM)],
             split_sharding_idx=TEST_GPU_NUM // 2,
         )
 
@@ -121,7 +134,7 @@ class TestCustomSharder(ShardedTensorTestBase):
             }
         )
 
-        local_model = MyModule().cuda(self.rank)
+        local_model = MyModule().to(torch.device(DEVICE_TYPE, self.rank))
         sharded_model = copy.deepcopy(local_model)
 
         # shard the module with the provided sharding plan
@@ -142,18 +155,18 @@ class TestCustomSharder(ShardedTensorTestBase):
 
         # make sure we can run sharded computation and compare outputs
         # with the local model version
-        input = torch.arange(8).reshape((2, 4)).cuda(self.rank)
+        input = torch.arange(8).reshape((2, 4)).to(torch.device(DEVICE_TYPE, self.rank))
         local_output = local_model(input)
         sharded_output = sharded_model(input)
 
         self.assertEqual(local_output, sharded_output)
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_custom_sharder_errors(self):
         custom_sharder = CustomSharder(
-            devices=[f"rank:{i}/cuda:{i}" for i in range(TEST_GPU_NUM)],
+            devices=[f"rank:{i}/{DEVICE_TYPE}:{i}" for i in range(TEST_GPU_NUM)],
             split_sharding_idx=TEST_GPU_NUM // 2,
         )
 
@@ -163,7 +176,9 @@ class TestCustomSharder(ShardedTensorTestBase):
             }
         )
 
-        sharded_model = CustomEmbeddingBagCollection(10, 10, 8).cuda(self.rank)
+        sharded_model = CustomEmbeddingBagCollection(10, 10, 8).to(
+            torch.device(DEVICE_TYPE, self.rank)
+        )
 
         with self.assertRaisesRegex(
             KeyError, "path must not be empty for custom sharder!"
@@ -172,7 +187,13 @@ class TestCustomSharder(ShardedTensorTestBase):
             shard_module(sharded_model, sharding_plan)
 
         # test conflicted sharding plan
-        spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:0", "rank:1/cuda:1"])
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                f"rank:0/{DEVICE_TYPE}:0",
+                f"rank:1/{DEVICE_TYPE}:1",
+            ],
+        )
         sharding_plan = ShardingPlan(
             plan={
                 "embedding_bags.embedding_bag_0.weight": spec,
