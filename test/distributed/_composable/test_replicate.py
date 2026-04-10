@@ -15,12 +15,7 @@ from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import (
-    IS_LINUX,
-    run_tests,
-    TEST_WITH_ROCM,
-    TEST_XPU,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_PRIVATEUSE1, TEST_XPU
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -142,6 +137,7 @@ class ReplicateTest(MultiProcContinuousTest):
     )
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
+    @unittest.skipIf(TEST_PRIVATEUSE1, "Gloo does not support PrivateUse1 device tensors")
     def test_replicate_move_args_kwargs_to_device(self):
         class MyNet(nn.Module):
             def __init__(self) -> None:
@@ -163,6 +159,7 @@ class ReplicateTest(MultiProcContinuousTest):
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179854")
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
+    @unittest.skipIf(TEST_PRIVATEUSE1, "Gloo does not support PrivateUse1 device tensors")
     def test_replicate_ignore_module(self):
         torch.accelerator.set_device_index(self.rank)
         # Seed ensures diff input and thus different local grads across ranks.
@@ -213,6 +210,7 @@ class ReplicateTest(MultiProcContinuousTest):
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179746")
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
+    @unittest.skipIf(TEST_PRIVATEUSE1, "Gloo does not support PrivateUse1 device tensors")
     def test_replicate_device_id(self):
         model = Net()
         model_cuda = deepcopy(model).to(device_type)
@@ -251,6 +249,7 @@ class ReplicateFullyShardInit(ReplicateTest):
     @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/179810")
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
+    @unittest.skipIf(TEST_PRIVATEUSE1, "Gloo does not support PrivateUse1 device tensors")
     def test_replicate_fully_shard_init(self):
         class ToyModel(nn.Module):
             def __init__(self, dim: int):
