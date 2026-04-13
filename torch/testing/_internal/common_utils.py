@@ -1509,29 +1509,6 @@ TEST_MULTIACCELERATOR = LazyVal(lambda: torch.accelerator.device_count() > 1)  #
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 TEST_PRIVATEUSE1 = _is_privateuse1_backend_available()
 TEST_PRIVATEUSE1_DEVICE_TYPE = torch._C._get_privateuse1_backend_name()
-
-# Backend to use for torch.compile in tests. When set via PYTORCH_TEST_COMPILE_BACKEND,
-# replaces "eager", "aot_eager", and "inductor" backends, allowing PrivateUse1 backends
-# to run dynamo tests without modifying test files.
-# Example: PYTORCH_TEST_COMPILE_BACKEND=neuron pytest test/dynamo/
-_PYTORCH_TEST_COMPILE_BACKEND = os.environ.get("PYTORCH_TEST_COMPILE_BACKEND", "")
-_COMPILE_BACKEND_REDIRECTED = frozenset(
-    {"eager", "aot_eager", "inductor", "aot_eager_decomp_partition"}
-)
-COMPILE_BACKEND: str = _PYTORCH_TEST_COMPILE_BACKEND if _PYTORCH_TEST_COMPILE_BACKEND else "eager"
-
-
-def get_compile_backend(backend: str = "eager") -> str:
-    """Return the backend to use for torch.compile in tests.
-
-    If PYTORCH_TEST_COMPILE_BACKEND is set, replaces standard backends
-    ("eager", "aot_eager", "inductor", "aot_eager_decomp_partition") with
-    the specified backend. Non-standard backends (e.g. custom test backends)
-    are returned unchanged.
-    """
-    if _PYTORCH_TEST_COMPILE_BACKEND and backend in _COMPILE_BACKEND_REDIRECTED:
-        return _PYTORCH_TEST_COMPILE_BACKEND
-    return backend
 TEST_NUMBA = _check_module_exists('numba')
 TEST_TRANSFORMERS = _check_module_exists('transformers')
 TEST_DILL = _check_module_exists('dill')
