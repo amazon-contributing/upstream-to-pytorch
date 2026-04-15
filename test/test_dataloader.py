@@ -109,7 +109,7 @@ TEST_PRIVATEUSE1_IPC = (
 
 TEST_MULTIGPU = (
     (TEST_CUDA_IPC and torch.cuda.device_count() > 1)
-    or (TEST_PRIVATEUSE1_IPC and getattr(_privateuse1_mod, "device_count", lambda: 0)() > 1)
+    or (TEST_PRIVATEUSE1_IPC and torch.accelerator.device_count() > 1)
 )
 
 # We want to use `spawn` if able because some of our tests check that the
