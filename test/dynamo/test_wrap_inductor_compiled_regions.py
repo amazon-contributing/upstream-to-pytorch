@@ -10,9 +10,11 @@ from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._inductor import config as inductor_config
 from torch.nn.attention.flex_attention import flex_attention, flex_attention_hop
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_accelerator_and_triton
 from torch.utils._debug_mode import DebugMode
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch.utils.checkpoint import (
+
     checkpoint,
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
@@ -68,7 +70,7 @@ def count_ops(
 class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
     """Tests for wrap_inductor_compiled_regions option"""
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     def test_wrap_enabled_visible_in_debug_mode(self):
         """Test that compiled regions are wrapped when option is enabled"""
 
@@ -80,8 +82,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         with DebugMode() as debug_mode:
             result = fn(x, y)
@@ -107,8 +109,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         with DebugMode() as debug_mode:
             result = fn(x, y)
@@ -122,7 +124,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         expected = torch.matmul(x, y)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     def test_wrap_default_disabled(self):
         """Test that wrapping is disabled by default"""
 
@@ -130,8 +132,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         with DebugMode() as debug_mode:
             result = fn(x, y)
@@ -145,7 +147,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         expected = torch.matmul(x, y)
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     def test_wrap_with_backward(self):
         """Test that wrapping works correctly with backward pass"""
 
@@ -157,8 +159,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+        x = torch.randn(4, 4, device=device_type, requires_grad=True)
+        y = torch.randn(4, 4, device=device_type, requires_grad=True)
 
         # Clone for eager comparison
         x_eager = x.detach().clone().requires_grad_(True)
@@ -185,7 +187,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertEqual(x.grad, x_eager.grad)
         self.assertEqual(y.grad, y_eager.grad)
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     def test_wrap_with_multiple_ops(self):
         """Test wrapping with a function that has multiple operations"""
 
@@ -200,8 +202,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             c = b + x
             return c
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         with DebugMode() as debug_mode:
             result = fn(x, y)
@@ -217,7 +219,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         expected = b + x
         self.assertEqual(result, expected)
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     def test_wrap_option_type_validation(self):
         """Test that wrap_inductor_compiled_regions validates type correctly"""
 
@@ -236,7 +238,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn_false(x):
             return x + 1
 
-        x = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=device_type)
         _ = fn_true(x)
         _ = fn_false(x)
 
@@ -252,7 +254,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 
         self.assertIn("Unexpected type", str(cm.exception))
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     def test_wrap_per_compilation(self):
         """Test that wrap option is per-compilation, not global"""
 
@@ -272,8 +274,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn_not_wrapped(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         # First function should be wrapped
         with DebugMode() as debug_mode1:
@@ -285,7 +287,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             _ = fn_not_wrapped(x, y)
         self.assertNotIn("inductor_compiled_code", debug_mode2.debug_string())
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -301,8 +303,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         # Clear all caches and counters
         counters.clear()
@@ -365,7 +367,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertEqual(result1, expected)
         self.assertEqual(result2, expected)
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -380,8 +382,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         # Clear all caches and counters
         counters.clear()
@@ -457,7 +459,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         # Unwrapped version should not
         self.assertNotIn("inductor_compiled_code", debug_unwrapped.debug_string())
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     def test_flex_attention_with_wrapper_basic(self):
         """Test that flex_attention works with wrap_inductor_compiled_regions=True"""
 
@@ -473,9 +475,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             return flex_attention(q, k, v, score_mod=causal_score_mod)
 
         B, H, S, D = 2, 4, 128, 64
-        q = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
-        k = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
-        v = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
+        q = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+        k = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+        v = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
 
         # Test forward pass
         output = fn(q, k, v)
@@ -493,7 +495,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         output_unwrapped = fn_unwrapped(q, k, v)
         torch.testing.assert_close(output, output_unwrapped, rtol=1e-3, atol=1e-3)
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     def test_flex_attention_wrapper_visible_in_debug_mode(self):
         """Test that inductor_compiled_code HOP is visible to DebugMode when wrapper is enabled"""
 
@@ -517,9 +519,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             return flex_attention(q, k, v, score_mod=score_mod)
 
         B, H, S, D = 2, 4, 128, 64
-        q = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
-        k = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
-        v = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
+        q = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+        k = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+        v = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
 
         # Test with wrapper enabled - should see inductor_compiled_code HOP
         with DebugMode() as debug_wrapped:
@@ -543,7 +545,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             "inductor_compiled_code HOP should not be visible when wrapper is disabled",
         )
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     def test_flex_attention_wrapper_with_backward(self):
         """Test that wrapper works correctly with backward pass"""
 
@@ -560,13 +562,13 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 
         B, H, S, D = 2, 4, 128, 64
         q = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         k = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         v = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
 
         # Forward and backward
@@ -600,7 +602,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(k.grad, k2.grad, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(v.grad, v2.grad, rtol=1e-3, atol=1e-3)
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -623,9 +625,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             return fn
 
         B, H, S, D = 2, 4, 128, 64
-        q = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
-        k = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
-        v = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
+        q = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+        k = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+        v = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
 
         # Clear all caches
         counters.clear()
@@ -669,7 +671,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         # Verify correctness
         torch.testing.assert_close(result1, result2)
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     def test_flex_attention_with_sac_must_save(self):
         """
         Test that SAC policy MUST_SAVE for flex_attention_hop
@@ -706,13 +708,13 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 
         B, H, S, D = 2, 4, 128, 64
         q = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         k = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         v = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
 
         # Forward compiler: should see flex_attention_hop once
@@ -753,7 +755,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(k.grad)
         self.assertIsNotNone(v.grad)
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     def test_flex_attention_with_sac_prefer_recompute(self):
         """
         Test that SAC policy PREFER_RECOMPUTE for flex_attention_hop
@@ -791,13 +793,13 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 
         B, H, S, D = 2, 4, 128, 64
         q = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         k = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         v = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
 
         # Forward compiler: should see flex_attention_hop once
@@ -838,7 +840,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(k.grad)
         self.assertIsNotNone(v.grad)
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     def test_sac_outer_compile_inner_basic(self):
         """
         Test SAC(compile(foo)) pattern - SAC on eager code with inner compiled region.
@@ -876,8 +878,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             b = torch.relu(a)
             return b
 
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+        x = torch.randn(4, 4, device=device_type, requires_grad=True)
+        y = torch.randn(4, 4, device=device_type, requires_grad=True)
 
         # Clone for comparison
         x_eager = x.detach().clone().requires_grad_(True)
@@ -945,8 +947,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             def fn(x, y):
                 return torch.matmul(x, y)
 
-            x = torch.randn(4, 4, device="cuda")
-            y = torch.randn(4, 4, device="cuda")
+            x = torch.randn(4, 4, device=device_type)
+            y = torch.randn(4, 4, device=device_type)
             expected = torch.matmul(x, y)
 
             result_without = fn(x, y)
@@ -970,8 +972,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             def fn2(x, y):
                 return torch.matmul(x, y)
 
-            x2 = torch.randn(4, 4, device="cuda")
-            y2 = torch.randn(4, 4, device="cuda")
+            x2 = torch.randn(4, 4, device=device_type)
+            y2 = torch.randn(4, 4, device=device_type)
             expected2 = torch.matmul(x2, y2)
 
             with DebugMode():
@@ -981,7 +983,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             mock_hop.assert_called()
             self.assertEqual(result_with, expected2)
 
-    @requires_cuda_and_triton
+    @requires_accelerator_and_triton
     def test_sac_outer_compile_inner_flex_attention(self):
         """
         Test SAC(compile(foo)) with flex_attention - the key motivating use case.
@@ -1016,13 +1018,13 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 
         B, H, S, D = 2, 4, 128, 64
         q = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         k = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         v = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
 
         # Enable wrapping at the inductor config level so that flex_attention's
