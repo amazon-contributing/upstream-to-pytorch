@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     slowTest,
     TEST_CUDA,
     TEST_NUMPY,
+    TEST_PRIVATEUSE1,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
     TestCase,
@@ -98,18 +99,10 @@ TEST_CUDA_IPC = (
     #    and not TEST_WITH_ROCM
 )  # https://github.com/pytorch/pytorch/issues/90940
 
-_privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
-_privateuse1_mod = getattr(torch, _privateuse1_backend_name, None)
 TEST_PRIVATEUSE1_IPC = (
-    _privateuse1_mod is not None
-    and getattr(_privateuse1_mod, "is_available", lambda: False)()
+    TEST_PRIVATEUSE1
     and sys.platform != "darwin"
     and sys.platform != "win32"
-)
-
-TEST_MULTIGPU = (
-    (TEST_CUDA_IPC and torch.cuda.device_count() > 1)
-    or (TEST_PRIVATEUSE1_IPC and torch.accelerator.device_count() > 1)
 )
 
 # We want to use `spawn` if able because some of our tests check that the
