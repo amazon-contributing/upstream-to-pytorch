@@ -20,7 +20,9 @@ from torch._inductor.test_case import run_tests
 from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
 from torch.fx._graph_pickler import GraphPickler
 from torch.fx.passes.regional_inductor import regional_inductor
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch.fx.passes.regional_inductor_invoke_subgraph import (
+
     regional_inductor_invoke_subgraph,
 )
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
@@ -29,7 +31,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfTorchDynamo,
 )
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.testing._internal.triton_utils import requires_accelerator_and_triton
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -245,7 +247,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         # once - so in total 2 (1 fwd + 1 bwd)
         self.assertEqual(len(codes), 2)
 
-    @requires_gpu_and_triton
+    @requires_accelerator_and_triton
     @parametrize("serialize", [False, True])
     def test_flex_attention(self, serialize):
         def _squared(score, b, h, m, n):
@@ -430,7 +432,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         ):
             opt_fn(x, y)
 
-    @requires_gpu_and_triton
+    @requires_accelerator_and_triton
     @parametrize("serialize", [False, True])
     def test_selective_ac_flex(self, serialize):
         class FlexAttentionModule(torch.nn.Module):
@@ -1136,7 +1138,7 @@ def forward(self, arg0_1, arg1_1):
                 ignore_empty_lines=True,
             )
 
-    @requires_gpu_and_triton
+    @requires_accelerator_and_triton
     @parametrize("serialize", [False])  # , True
     def test_flex_attention(self, serialize):
         def _squared(score, b, h, m, n):
@@ -1297,7 +1299,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 }
             )
 
-    @requires_gpu_and_triton
+    @requires_accelerator_and_triton
     @parametrize("serialize", [False])  # , True
     def test_selective_ac_flex(self, serialize):
         # must decompose the following fallback ops in inductor

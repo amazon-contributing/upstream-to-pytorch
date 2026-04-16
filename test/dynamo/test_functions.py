@@ -27,7 +27,9 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
 from torch._dynamo.exc import Unsupported
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch._dynamo.testing import (
+
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
     normalize_gm,
@@ -39,6 +41,7 @@ from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_cuda,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 
@@ -1513,7 +1516,7 @@ partial_fn = functools.partial(fn, scale=2)
         if x.device.type == "cpu":
             return x + 1
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @make_test
     def test_get_device_properties_tensor_device(a):
         x = a.to("cuda")
@@ -1543,7 +1546,7 @@ partial_fn = functools.partial(fn, scale=2)
         m = a.type("torch.HalfTensor")
         return b.type(m.type())
 
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @make_test
     def test_tensor_type5(a, b):
         m = a.to(device_type).half()

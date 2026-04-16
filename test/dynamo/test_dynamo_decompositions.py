@@ -15,6 +15,9 @@ from torch.testing._internal.common_utils import (
 )
 
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 class TestDynamoDecompositions(torch._dynamo.test_case.TestCase):
     """Tests for enable_dynamo_decompositions config flag.
 
@@ -776,9 +779,9 @@ class TestDynamoDecompositionsNumerics(TestCase):
         """ATen add_ with tensor alpha extracts the scalar and uses
         fma(other, alpha, self). Our decomposition must use fma to match."""
         torch.manual_seed(42)
-        x = torch.randn(64, 64, device=device)
-        other = torch.randn(64, 64, device=device)
-        alpha = torch.tensor(2.3, device=device)
+        x = torch.randn(64, 64, device=device_type)
+        other = torch.randn(64, 64, device=device_type)
+        alpha = torch.tensor(2.3, device=device_type)
 
         def fn(x, other, alpha):
             return x.add_(other, alpha=alpha)
@@ -797,8 +800,8 @@ class TestDynamoDecompositionsNumerics(TestCase):
         mismatches on typical inputs (e.g. Adagrad's addcmul_(grad, grad, value=1)).
         """
         torch.manual_seed(42)
-        x = torch.randn(64, 64, device=device)
-        t1 = torch.randn(64, 64, device=device)
+        x = torch.randn(64, 64, device=device_type)
+        t1 = torch.randn(64, 64, device=device_type)
 
         def fn(x, t1):
             # value=1 is a constant, triggers fma path in decomposition
@@ -813,9 +816,9 @@ class TestDynamoDecompositionsNumerics(TestCase):
     def test_addcmul_scalar_value(self, device):
         """Compiled addcmul_ with scalar value matches eager."""
         torch.manual_seed(42)
-        x = torch.randn(64, 64, device=device)
-        t1 = torch.randn(64, 64, device=device)
-        t2 = torch.randn(64, 64, device=device)
+        x = torch.randn(64, 64, device=device_type)
+        t1 = torch.randn(64, 64, device=device_type)
+        t2 = torch.randn(64, 64, device=device_type)
 
         def fn(x, t1, t2):
             return x.addcmul_(t1, t2, value=0.5)
@@ -829,10 +832,10 @@ class TestDynamoDecompositionsNumerics(TestCase):
     def test_addcmul_tensor_value(self, device):
         """Compiled addcmul_ with tensor value matches eager."""
         torch.manual_seed(42)
-        x = torch.randn(64, 64, device=device)
-        t1 = torch.randn(64, 64, device=device)
-        t2 = torch.randn(64, 64, device=device)
-        value = torch.tensor(0.5, device=device)
+        x = torch.randn(64, 64, device=device_type)
+        t1 = torch.randn(64, 64, device=device_type)
+        t2 = torch.randn(64, 64, device=device_type)
+        value = torch.tensor(0.5, device=device_type)
 
         def fn(x, t1, t2, value):
             return x.addcmul_(t1, t2, value=value)
@@ -851,9 +854,9 @@ class TestDynamoDecompositionsNumerics(TestCase):
         which nvcc can optimize differently than separate div + fma kernels.
         """
         torch.manual_seed(42)
-        x = torch.randn(64, 64, device=device)
-        t1 = torch.randn(64, 64, device=device)
-        t2 = torch.randn(64, 64, device=device) + 0.1
+        x = torch.randn(64, 64, device=device_type)
+        t1 = torch.randn(64, 64, device=device_type)
+        t2 = torch.randn(64, 64, device=device_type) + 0.1
 
         def fn(x, t1, t2):
             return x.addcdiv_(t1, t2, value=-0.01)
@@ -872,10 +875,10 @@ class TestDynamoDecompositionsNumerics(TestCase):
         which nvcc can optimize differently than separate div + fma kernels.
         """
         torch.manual_seed(42)
-        x = torch.randn(64, 64, device=device)
-        t1 = torch.randn(64, 64, device=device)
-        t2 = torch.randn(64, 64, device=device) + 0.1
-        value = torch.tensor(-0.01, device=device)
+        x = torch.randn(64, 64, device=device_type)
+        t1 = torch.randn(64, 64, device=device_type)
+        t2 = torch.randn(64, 64, device=device_type) + 0.1
+        value = torch.tensor(-0.01, device=device_type)
 
         def fn(x, t1, t2, value):
             return x.addcdiv_(t1, t2, value=value)
@@ -889,8 +892,8 @@ class TestDynamoDecompositionsNumerics(TestCase):
     def test_add_scalar_alpha(self, device):
         """Compiled add_ with scalar alpha matches eager."""
         torch.manual_seed(42)
-        x = torch.randn(64, 64, device=device)
-        other = torch.randn(64, 64, device=device)
+        x = torch.randn(64, 64, device=device_type)
+        other = torch.randn(64, 64, device=device_type)
 
         def fn(x, other):
             return x.add_(other, alpha=2.3)
