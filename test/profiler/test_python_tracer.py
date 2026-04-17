@@ -7,7 +7,7 @@ import threading
 import time
 
 import torch
-from torch.profiler import profile, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity, supported_activities
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfPythonVersionMismatch,
@@ -30,7 +30,7 @@ class TestPythonTracer(TestCase):
         names = ["Alice", "Bob"]
 
         with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True
+            activities=supported_activities(), with_stack=True
         ) as prof:
             sorted(names, key=get_key)
 
@@ -56,7 +56,7 @@ class TestPythonTracer(TestCase):
         from sys import monitoring
 
         with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True
+            activities=supported_activities(), with_stack=True
         ):
             name = monitoring.get_tool(2)
             if vi.micro < 5:
