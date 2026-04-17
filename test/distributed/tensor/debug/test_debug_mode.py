@@ -50,6 +50,13 @@ from torch.utils._triton import has_triton_package
 
 
 @requires_accelerator
+
+def _get_accelerator_memory():
+    try:
+        return torch.accelerator.get_memory_info(0)[1]
+    except (RuntimeError, NotImplementedError):
+        return 0  # Return 0, as that would help skip the test is not skipped
+
 class TestDTensorDebugMode(TestCase):
     def tearDown(self):
         super().tearDown()
@@ -912,7 +919,7 @@ class TestDTensorDebugMode(TestCase):
 
     @unittest.skipIf(
         not torch.accelerator.is_available()
-        or torch.accelerator.get_memory_info(0)[1] < 2**26,
+        or _get_accelerator_memory() < 2**26,
         "Being conservative, test peak memory is 25MB?",
     )
     def test_tensor_hash_redistribute(self):
