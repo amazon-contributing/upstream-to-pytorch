@@ -105,7 +105,12 @@ T = TypeVar("T")
 # when get_gpu_type is imported from dynamo
 @functools.cache
 def get_gpu_type() -> str:
-    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
+    gpu_types = list(GPU_TYPES)
+    privateuse1_name = torch._C._get_privateuse1_backend_name()
+    if privateuse1_name and privateuse1_name != "privateuseone":
+        if hasattr(torch, privateuse1_name):
+            gpu_types.append(privateuse1_name)
+    avail_gpus = [x for x in gpu_types if getattr(torch, x).is_available()]
     assert len(avail_gpus) <= 1
     gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
     return gpu_type
