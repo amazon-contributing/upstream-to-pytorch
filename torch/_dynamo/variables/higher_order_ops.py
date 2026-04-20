@@ -35,7 +35,7 @@ import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
+from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
@@ -64,6 +64,7 @@ from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
+from .sets import SetVariable
 
 
 if TYPE_CHECKING:
@@ -233,6 +234,9 @@ def find_mismatched_vars(
     elif isinstance(var, ConstDictVariable):
         for value in var.items.values():
             mismatched_vars.update(find_mismatched_vars(value, types, allow_none))
+    elif isinstance(var, SetVariable):
+        for key in var.items:
+            mismatched_vars.update(find_mismatched_vars(key.vt, types, allow_none))
     else:
         if not isinstance(var, types) and not (allow_none and var.is_constant_none()):
             mismatched_vars.add(var)
@@ -1712,7 +1716,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 ):
                     graph_output_vt_list.append(vt)
 
-            VariableTracker.visit(visit, output)
+            VariableTracker.visit(visit, output, side_effects=tx.output.side_effects)
             graph_output_vts = tuple(graph_output_vt_list)
 
             # NOTE - [Return subgraph intermediates as subgraph outputs]
@@ -1753,11 +1757,13 @@ def speculate_subgraph_with_auto_output_flattening(
             # nested_compile_region and autograd.Function. Today, its safe
             # because we error out on seeing a side-effect.
 
-            allow_side_effects = (
-                allow_side_effects
-                or tx.output.current_tracer.traced_with_externally_visible_side_effects
+            traced_externally = (
+                tx.output.current_tracer.traced_with_externally_visible_side_effects
             )
-            if allow_side_effects:
+            has_side_effects = (
+                subtracer.side_effect_stack is not None or traced_externally
+            )
+            if (allow_side_effects or traced_externally) and has_side_effects:
                 extra_outputs = collect_intermediate_outputs(
                     tx, subtracer, graph_output_vts, filter_aliased_intermediates
                 )
@@ -1836,7 +1842,7 @@ def speculate_subgraph_with_auto_output_flattening(
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
         log.info(msg)
-        log.info(ex)  # noqa: G200
+        log.info(ex)
         raise ex
 
 
@@ -2036,7 +2042,7 @@ def speculate_subgraph(
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
         log.info(msg)
-        log.info(ex)  # noqa: G200
+        log.info(ex)
         raise ex
 
 
@@ -3755,11 +3761,13 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         unpacked_sequence = args[1].unpack_var_sequence(tx)
         # TODO (tmanlaibaatar) support pytree here
         for arg in unpacked_sequence:
-            if isinstance(arg, (ListVariable, TupleVariable, ConstDictVariable)):
+            if isinstance(
+                arg, (ListVariable, TupleVariable, ConstDictVariable, SetVariable)
+            ):
                 unimplemented(
                     gb_type="strict_mode: improper args",
                     context=f"args: {args}, kwargs: {kwargs}",
-                    explanation="strict_mode higher order op expects flat inputs (list/tuple/dict)",
+                    explanation="strict_mode higher order op expects flat inputs (list/tuple/dict/set)",
                     hints=[
                         *graph_break_hints.USER_ERROR,
                     ],
@@ -4516,6 +4524,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
 
+    def python_type(self) -> type:
+        return types.BuiltinMethodType
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -4825,7 +4836,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 if i.is_tensor():
                     bwd_args.append(i)
                 else:
-                    bwd_args.append(CONSTANT_VARIABLE_NONE)
+                    bwd_args.append(ConstantVariable.create(None))
 
         bwd_fn, bwd_args = self.prepare_fn_vt(tx, ctx, "backward", bwd_args)
 
@@ -5657,7 +5668,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         return out
 
 
-from .invoke_subgraph import InvokeSubgraphHigherOrderVariable  # noqa: E402
+from .invoke_subgraph import InvokeSubgraphHigherOrderVariable
 
 
 # Map operator names to their corresponding variable for fast TorchHigherOrderOperatorVariable.make()
