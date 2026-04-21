@@ -5,6 +5,7 @@
 import contextlib
 import copy
 import functools
+import os
 import itertools
 import sys
 import types
@@ -1120,3 +1121,25 @@ def validate_sharding_rule_sample(
     return ref_output.shape == full_output.shape and torch.allclose(
         ref_output, full_output, atol=1e-5, rtol=1e-5
     )
+
+
+if os.environ.get("PYTORCH_TESTING_PREFER_MULTIPROCESS"):
+    _PREFER_MULTIPROCESS_MAX_WORLD_SIZE = int(
+        os.environ.get("PYTORCH_TESTING_PREFER_MULTIPROCESS_MAX_WORLD_SIZE", "4")
+    )
+
+    class DTensorOpTestBase(DTensorTestBase):  # type: ignore[no-redef]
+        @property
+        def world_size(self):
+            return min(_PREFER_MULTIPROCESS_MAX_WORLD_SIZE, NUM_DEVICES)
+
+        def __init_subclass__(cls, **kwargs):
+            super().__init_subclass__(**kwargs)
+            if "world_size" in cls.__dict__:
+                orig = cls.__dict__["world_size"]
+                if isinstance(orig, property):
+                    cls.world_size = property(
+                        lambda self, f=orig.fget: min(
+                            _PREFER_MULTIPROCESS_MAX_WORLD_SIZE, f(self)
+                        )
+                    )
