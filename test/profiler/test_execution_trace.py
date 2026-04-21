@@ -413,7 +413,7 @@ class TestExecutionTrace(TestCase):
     )
     @unittest.skipIf(
         not (has_triton() and (TEST_CUDA or TEST_XPU)),
-        "need triton and device(CUDA or XPU) device availability to run",
+        "need triton and device(CUDA or XPU) availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_execution_trace_with_pt2(self, device):
@@ -481,7 +481,7 @@ class TestExecutionTrace(TestCase):
     )
     @unittest.skipIf(
         not (has_triton() and (TEST_CUDA or TEST_XPU)),
-        "need device(CUDA or XPU) device availability to run",
+        "need triton and device(CUDA or XPU) availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_execution_trace_env_enabled_with_pt2(self, device):
@@ -551,7 +551,7 @@ class TestExecutionTrace(TestCase):
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
         not (has_triton() and (TEST_CUDA or TEST_XPU)),
-        "need triton and device(CUDA or XPU) device availability to run",
+        "need triton and device(CUDA or XPU) availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_triton_fx_graph_with_et(self, device):
