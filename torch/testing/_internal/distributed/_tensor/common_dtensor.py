@@ -5,6 +5,7 @@
 import contextlib
 import copy
 import functools
+import os
 import itertools
 import sys
 import types
