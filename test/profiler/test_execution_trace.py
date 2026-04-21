@@ -58,6 +58,16 @@ except ImportError:
 
 Json = dict[str, Any]
 
+USE_DEVICE = any(
+    a in supported_activities()
+    for a in (
+        torch.profiler.ProfilerActivity.CUDA,
+        torch.profiler.ProfilerActivity.XPU,
+        torch.profiler.ProfilerActivity.HPU,
+        torch.profiler.ProfilerActivity.PrivateUse1,
+    )
+)
+
 
 class TestExecutionTrace(TestCase):
     def payload(self, device, use_device=False):
@@ -146,17 +156,8 @@ class TestExecutionTrace(TestCase):
             nonlocal trace_called_num
             trace_called_num += 1
 
-        use_device = any(
-            a in supported_activities()
-            for a in (
-                torch.profiler.ProfilerActivity.CUDA,
-                torch.profiler.ProfilerActivity.XPU,
-                torch.profiler.ProfilerActivity.HPU,
-                torch.profiler.ProfilerActivity.PrivateUse1,
-            )
-        )
-        # Create a temp file to save execution trace and kineto data.
-
+        use_device = USE_DEVICE
+        # Create a temp file to save execution trace and kineto data
         with (
             tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp,
             tempfile.NamedTemporaryFile(
@@ -239,15 +240,7 @@ class TestExecutionTrace(TestCase):
             nonlocal trace_called_num
             trace_called_num += 1
 
-        use_device = any(
-            a in supported_activities()
-            for a in (
-                torch.profiler.ProfilerActivity.CUDA,
-                torch.profiler.ProfilerActivity.XPU,
-                torch.profiler.ProfilerActivity.HPU,
-                torch.profiler.ProfilerActivity.PrivateUse1,
-            )
-        )
+        use_device = USE_DEVICE
         # Create a temp file to save kineto data.
 
         with (
@@ -321,15 +314,7 @@ class TestExecutionTrace(TestCase):
         )
 
     def test_execution_trace_alone(self, device):
-        use_device = any(
-            a in supported_activities()
-            for a in (
-                torch.profiler.ProfilerActivity.CUDA,
-                torch.profiler.ProfilerActivity.XPU,
-                torch.profiler.ProfilerActivity.HPU,
-                torch.profiler.ProfilerActivity.PrivateUse1,
-            )
-        )
+        use_device = USE_DEVICE
         # Create a temp file to save execution trace data.
         # Use a gzip file to test compression codepath
         with tempfile.NamedTemporaryFile("w", suffix=".et.json.gz", delete=False) as fp:
@@ -383,15 +368,7 @@ class TestExecutionTrace(TestCase):
 
         os.environ["ENABLE_PYTORCH_EXECUTION_TRACE"] = "0"
         os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS"] = "0"
-        use_device = any(
-            a in supported_activities()
-            for a in (
-                torch.profiler.ProfilerActivity.CUDA,
-                torch.profiler.ProfilerActivity.XPU,
-                torch.profiler.ProfilerActivity.HPU,
-                torch.profiler.ProfilerActivity.PrivateUse1,
-            )
-        )
+        use_device = USE_DEVICE
 
         with profile(
             activities=torch.profiler.supported_activities(),
@@ -644,15 +621,7 @@ class TestExecutionTrace(TestCase):
                 os.remove(file_path)
 
     def test_execution_trace_start_stop(self, device):
-        use_device = any(
-            a in supported_activities()
-            for a in (
-                torch.profiler.ProfilerActivity.CUDA,
-                torch.profiler.ProfilerActivity.XPU,
-                torch.profiler.ProfilerActivity.HPU,
-                torch.profiler.ProfilerActivity.PrivateUse1,
-            )
-        )
+        use_device = USE_DEVICE
         # Create a temp file to save execution trace data.
         with tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp:
             filename = fp.name
@@ -696,15 +665,7 @@ class TestExecutionTrace(TestCase):
             )
 
     def test_execution_trace_repeat_in_loop(self, device):
-        use_device = any(
-            a in supported_activities()
-            for a in (
-                torch.profiler.ProfilerActivity.CUDA,
-                torch.profiler.ProfilerActivity.XPU,
-                torch.profiler.ProfilerActivity.HPU,
-                torch.profiler.ProfilerActivity.PrivateUse1,
-            )
-        )
+        use_device = USE_DEVICE
         iter_list = {3, 4, 6, 8}
         expected_loop_events = len(iter_list)
         output_files = []
