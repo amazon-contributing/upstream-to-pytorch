@@ -54,7 +54,7 @@ from torch.utils._triton import has_triton_package
 def _get_accelerator_memory():
     try:
         return torch.accelerator.get_memory_info(0)[1]
-    except (RuntimeError, NotImplementedError):
+    except (NotImplementedError):
         return 0  # Return 0, as that would help skip the test is not skipped
 
 class TestDTensorDebugMode(TestCase):
