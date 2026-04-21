@@ -810,7 +810,7 @@ class TestProfiler(TestCase):
             check_metrics(stats, "device_memory_usage", deallocs=["[memory]"])
         elif torch.xpu.is_available():
             check_metrics(stats, "device_memory_usage", deallocs=["[memory]"])
-        elif TEST_PRIVATEUSE1:
+        elif torch.accelerator.is_available():
             check_metrics(stats, "device_memory_usage", deallocs=["[memory]"])
 
     @unittest.skipIf(
@@ -1109,7 +1109,7 @@ class TestProfiler(TestCase):
         called_num = [0]
 
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
-        activities = supported_activities()                                                                                                                                                        
+        activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA, ProfilerActivity.PrivateUse1]
         use_accelerator = (                                                                                                                                                                                                                                                                                                   
             torch.profiler.ProfilerActivity.XPU in activities                                                                                                                        
             or torch.profiler.ProfilerActivity.PrivateUse1 in activities                                                                                                                   
@@ -1308,7 +1308,9 @@ class TestProfiler(TestCase):
 
         with TemporaryDirectoryName() as dname:
             with profile(
-                activities=supported_activities(),
+                activities=[torch.profiler.ProfilerActivity.CPU]
+                + ([torch.profiler.ProfilerActivity.CUDA] if use_cuda else [])
+                + ([torch.profiler.ProfilerActivity.PrivateUse1] if use_accelerator else []),
                 schedule=torch.profiler.schedule(wait=1, warmup=1, active=2, repeat=3),
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(dname),
             ) as p:
@@ -1332,7 +1334,9 @@ class TestProfiler(TestCase):
         # test case for gzip file format
         with TemporaryDirectoryName() as dname:
             p = profile(
-                activities=supported_activities(),
+                activities=[torch.profiler.ProfilerActivity.CPU]
+                + ([torch.profiler.ProfilerActivity.CUDA] if use_cuda else [])
+                + ([torch.profiler.ProfilerActivity.PrivateUse1] if use_accelerator else []),
                 schedule=torch.profiler.schedule(wait=1, warmup=1, active=2, repeat=3),
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(
                     dname, use_gzip=True
@@ -2269,7 +2273,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_cpu_annotation_overlap(self):
         with torch.profiler.profile(
-            activities=supported_activities(),
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA, ProfilerActivity.PrivateUse1],
             record_shapes=True,
             with_stack=True,
             schedule=torch.profiler.schedule(wait=0, warmup=0, active=5, repeat=1),
