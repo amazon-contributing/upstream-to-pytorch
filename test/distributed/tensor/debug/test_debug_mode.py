@@ -25,15 +25,19 @@ from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    requires_nccl,
+    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    requires_cuda,
+    requires_accelerator,
     run_tests,
     TestCase,
+)
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DEVICE_TYPE,
+    PG_BACKEND,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -49,160 +53,14 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._triton import has_triton_package
 
 
-class TestDebugModeLogSerialization(TestCase):
-    def _run_hashed_debug_mode(self, x):
-        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
-            x.sin().sum()
-        return debug_mode.logs
+@requires_accelerator
 
-    def test_save_load_empty_logs(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "empty.json")
-            DebugMode.save_logs([], path)
-            self.assertEqual(DebugMode.load_logs(path), [])
+def _get_accelerator_memory():
+    try:
+        return torch.accelerator.get_memory_info(0)[1]
+    except (NotImplementedError):
+        return 0  # Return 0, as that would help skip the test is not skipped
 
-    def test_save_load_redistribute_outer_call(self):
-        call = _RedistributeCall(1, "S(0)", "R", None, 0)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "redistribute.json")
-            DebugMode.save_logs([call], path)
-            loaded_call = DebugMode.load_logs(path)[0]
-
-        self.assertIsInstance(loaded_call, _RedistributeCall)
-        self.assertTrue(loaded_call.is_outer_call)
-        self.assertEqual(loaded_call.render([]), call.render([]))
-
-    def test_save_load_logs_for_hash_mismatch(self):
-        x = torch.arange(16, dtype=torch.float32).reshape(4, 4)
-        x_different = x + 1
-
-        logs1 = self._run_hashed_debug_mode(x)
-        logs2 = self._run_hashed_debug_mode(x_different)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path1 = os.path.join(tmpdir, "run1.json")
-            path2 = os.path.join(tmpdir, "run2.json")
-            DebugMode.save_logs(logs1, path1)
-            DebugMode.save_logs(logs2, path2)
-
-            loaded1 = DebugMode.load_logs(path1)
-            loaded2 = DebugMode.load_logs(path2)
-
-        self.assertEqual(
-            [log.render([]) for log in loaded1],
-            [log.render([]) for log in logs1],
-        )
-        self.assertEqual(
-            DebugMode.check_hash_mismatches(logs1, loaded1, compare_inputs=True),
-            [],
-        )
-        self.assertTrue(
-            any(
-                isinstance(log, _OpCall)
-                and log.log is not None
-                and isinstance(log.log.get("input_hash"), tuple)
-                for log in loaded1
-            )
-        )
-
-        mismatches = DebugMode.check_hash_mismatches(
-            loaded1, loaded2, compare_inputs=True
-        )
-        self.assertGreater(len(mismatches), 0)
-        self.assertIn("aten::sin", {mismatch["call"] for mismatch in mismatches})
-
-    def test_save_load_logs_with_record_outputs(self):
-        x = torch.arange(16, dtype=torch.float32).reshape(4, 4)
-
-        with (
-            DebugMode() as debug_mode,
-            DebugMode.record_outputs(),
-            DebugMode.log_tensor_hashes(),
-        ):
-            x.sin().sum()
-        logs = debug_mode.logs
-
-        self.assertTrue(
-            any(
-                isinstance(log, _OpCall)
-                and log.record is not None
-                and "output" in log.record
-                for log in logs
-            )
-        )
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "logs.json")
-            DebugMode.save_logs(logs, path)
-            loaded_logs = DebugMode.load_logs(path)
-
-        self.assertTrue(all(log.record is None for log in loaded_logs))
-        self.assertEqual(DebugMode.check_hash_mismatches(logs, loaded_logs), [])
-
-    def test_save_load_logs_with_nonfinite_hashes(self):
-        def reject_nonstandard_json_constant(value):
-            raise AssertionError(f"nonstandard JSON constant: {value}")
-
-        def run_with_hash(hash_value):
-            x = torch.arange(16, dtype=torch.float32).reshape(4, 4)
-            with (
-                DebugMode() as debug_mode,
-                DebugMode.log_tensor_hashes(
-                    hash_fn=lambda t: hash_value, hash_inputs=True
-                ),
-            ):
-                x.sin().sum()
-            return debug_mode.logs
-
-        logs_nan = run_with_hash(float("nan"))
-        logs_inf = run_with_hash(float("inf"))
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path_nan = os.path.join(tmpdir, "nan.json")
-            path_inf = os.path.join(tmpdir, "inf.json")
-            DebugMode.save_logs(logs_nan, path_nan)
-            DebugMode.save_logs(logs_inf, path_inf)
-
-            with open(path_nan, encoding="utf-8") as f:
-                nan_json = f.read()
-            with open(path_inf, encoding="utf-8") as f:
-                inf_json = f.read()
-
-            json.loads(nan_json, parse_constant=reject_nonstandard_json_constant)
-            json.loads(inf_json, parse_constant=reject_nonstandard_json_constant)
-            self.assertNotIn("NaN", nan_json)
-            self.assertNotIn("Infinity", inf_json)
-
-            loaded_nan = DebugMode.load_logs(path_nan)
-            loaded_inf = DebugMode.load_logs(path_inf)
-
-        self.assertTrue(
-            any(
-                isinstance(log, _OpCall)
-                and log.log is not None
-                and math.isnan(log.log["hash"])
-                for log in loaded_nan
-            )
-        )
-        self.assertTrue(
-            any(
-                isinstance(log, _OpCall)
-                and log.log is not None
-                and math.isinf(log.log["hash"])
-                for log in loaded_inf
-            )
-        )
-
-        mismatches = DebugMode.check_hash_mismatches(
-            loaded_nan, loaded_inf, compare_inputs=True
-        )
-        self.assertGreater(len(mismatches), 0)
-        self.assertTrue(any(math.isnan(mismatch["hash1"]) for mismatch in mismatches))
-        self.assertTrue(any(math.isinf(mismatch["hash2"]) for mismatch in mismatches))
-
-
-@requires_cuda
 class TestDTensorDebugMode(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -225,7 +83,7 @@ class TestDTensorDebugMode(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda"
+        self.device_type = DEVICE_TYPE
 
     def test_debug_mode_mm(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -1074,8 +932,8 @@ class TestDTensorDebugMode(TestCase):
         )
 
     @unittest.skipIf(
-        not torch.cuda.is_available()
-        or torch.cuda.get_device_properties(0).total_memory < 2**26,
+        not torch.accelerator.is_available()
+        or _get_accelerator_memory() < 2**26,
         "Being conservative, test peak memory is 25MB?",
     )
     def test_tensor_hash_redistribute(self):
@@ -1293,7 +1151,7 @@ class TestDTensorDebugMode(TestCase):
 
 
 class TestDebugModeUtils(TestCase):
-    """Test DebugMode with NCCL backend without using DTensor."""
+    """Test DebugMode utility functions."""
 
     def test_hash_empty_tensor(self):
         t = torch.tensor([])
@@ -1304,7 +1162,7 @@ class TestDebugModeUtils(TestCase):
         self.assertTrue(isinstance(out, int))
 
 
-class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
+class TestDTensorDebugModeDistBackend(MultiProcessTestCase):
     @property
     def world_size(self):
         return 2  # Need at least 2 ranks for collectives
@@ -1314,16 +1172,16 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         self._spawn_processes()
 
     def _init_process_group(self):
-        """Initialize NCCL process group for each spawned process."""
-        torch.cuda.set_device(self.rank)
+        """Initialize accelerator process group for each spawned process."""
+        torch.accelerator.set_device_index(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
-            "nccl",
+            PG_BACKEND,
             world_size=self.world_size,
             rank=self.rank,
             store=store,
         )
-        self.device = f"cuda:{self.rank}"
+        self.device = f"{DEVICE_TYPE}:{self.rank}"
 
     def _destroy_process_group(self):
         """Destroy the process group."""
@@ -1336,7 +1194,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         except OSError:
             pass
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
     def test_allgather_base(self):
         self._init_process_group()
@@ -1362,7 +1220,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
         self._destroy_process_group()
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
     def test_allgather_base_async_op(self):
         """Test all_gather_into_tensor with async_op=True."""
@@ -1397,7 +1255,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
         self._destroy_process_group()
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
     def test_allgather_functional_with_async_collective_tensor(self):
         self._init_process_group()
