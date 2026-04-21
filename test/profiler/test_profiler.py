@@ -1109,7 +1109,11 @@ class TestProfiler(TestCase):
         called_num = [0]
 
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
-        use_accelerator = device_type != "cpu"
+        activities = supported_activities()                                                                                                                                                        
+        use_accelerator = (                                                                                                                                                                                                                                                                                                   
+            torch.profiler.ProfilerActivity.XPU in activities                                                                                                                        
+            or torch.profiler.ProfilerActivity.PrivateUse1 in activities                                                                                                                   
+        )
         with profile(activities=supported_activities()):
             self.payload(use_cuda=use_accelerator)
 

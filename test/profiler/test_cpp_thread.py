@@ -361,7 +361,7 @@ class CppThreadTestPrivateUse1(TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        super(TestCase, cls).setUpClass()
+        super(CppThreadTestPrivateUse1, cls).setUpClass()
         CppThreadTestPrivateUse1.EventHandler = PythonProfilerEventHandler()
         cpp.ProfilerEventHandler.Register(CppThreadTestPrivateUse1.EventHandler)
 

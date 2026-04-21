@@ -412,8 +412,8 @@ class TestExecutionTrace(TestCase):
         sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
     )
     @unittest.skipIf(
-        not (has_triton() and (TEST_CUDA or TEST_XPU or TEST_PRIVATEUSE1)),
-        "need triton and accelerator device availability to run",
+        not (has_triton() and (TEST_CUDA or TEST_XPU)),
+        "need triton and device(CUDA or XPU) device availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_execution_trace_with_pt2(self, device):
@@ -480,8 +480,8 @@ class TestExecutionTrace(TestCase):
         sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
     )
     @unittest.skipIf(
-        not (has_triton() and (TEST_CUDA or TEST_XPU or TEST_PRIVATEUSE1)),
-        "need triton and accelerator device availability to run",
+        not (has_triton() and (TEST_CUDA or TEST_XPU)),
+        "need device(CUDA or XPU) device availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_execution_trace_env_enabled_with_pt2(self, device):
@@ -550,8 +550,8 @@ class TestExecutionTrace(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
-        not (has_triton() and (TEST_CUDA or TEST_XPU or TEST_PRIVATEUSE1)),
-        "need triton and accelerator device availability to run",
+        not (has_triton() and (TEST_CUDA or TEST_XPU)),
+        "need triton and device(CUDA or XPU) device availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_triton_fx_graph_with_et(self, device):
