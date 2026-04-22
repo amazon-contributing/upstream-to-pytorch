@@ -36,6 +36,8 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TemporaryFileName,
     TEST_HPU,
+    TEST_PRIVATEUSE1,
+    TEST_PRIVATEUSE1_DEVICE_TYPE,
     TEST_XPU,
     TestCase,
 )
@@ -56,6 +58,16 @@ except ImportError:
     pass
 
 Json = dict[str, Any]
+
+USE_DEVICE = any(
+    a in supported_activities()
+    for a in (
+        torch.profiler.ProfilerActivity.CUDA,
+        torch.profiler.ProfilerActivity.XPU,
+        torch.profiler.ProfilerActivity.HPU,
+        torch.profiler.ProfilerActivity.PrivateUse1,
+    )
+)
 
 
 class TestExecutionTrace(TestCase):
@@ -145,13 +157,8 @@ class TestExecutionTrace(TestCase):
             nonlocal trace_called_num
             trace_called_num += 1
 
-        use_device = (
-            torch.profiler.ProfilerActivity.CUDA
-            or torch.profiler.ProfilerActivity.XPU in supported_activities()
-            or torch.profiler.ProfilerActivity.HPU in supported_activities()
-        )
-        # Create a temp file to save execution trace and kineto data.
-
+        use_device = USE_DEVICE
+        # Create a temp file to save execution trace and kineto data
         with (
             tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp,
             tempfile.NamedTemporaryFile(
@@ -237,11 +244,7 @@ class TestExecutionTrace(TestCase):
             nonlocal trace_called_num
             trace_called_num += 1
 
-        use_device = (
-            torch.profiler.ProfilerActivity.CUDA
-            or torch.profiler.ProfilerActivity.XPU in supported_activities()
-            or torch.profiler.ProfilerActivity.HPU in supported_activities()
-        )
+        use_device = USE_DEVICE
         # Create a temp file to save kineto data.
 
         with (
@@ -315,11 +318,7 @@ class TestExecutionTrace(TestCase):
         )
 
     def test_execution_trace_alone(self, device):
-        use_device = (
-            torch.profiler.ProfilerActivity.CUDA
-            or torch.profiler.ProfilerActivity.HPU in supported_activities()
-            or torch.profiler.ProfilerActivity.XPU in supported_activities()
-        )
+        use_device = USE_DEVICE
         # Create a temp file to save execution trace data.
         # Use a gzip file to test compression codepath
         with tempfile.NamedTemporaryFile("w", suffix=".et.json.gz", delete=False) as fp:
@@ -376,11 +375,11 @@ class TestExecutionTrace(TestCase):
         },
     )
     def test_execution_trace_env_disabled(self, device):
-        use_device = (
-            torch.profiler.ProfilerActivity.CUDA
-            or torch.profiler.ProfilerActivity.HPU in supported_activities()
-            or torch.profiler.ProfilerActivity.XPU in supported_activities()
-        )
+        import os
+
+        os.environ["ENABLE_PYTORCH_EXECUTION_TRACE"] = "0"
+        os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS"] = "0"
+        use_device = USE_DEVICE
 
         with profile(
             activities=torch.profiler.supported_activities(),
@@ -635,11 +634,7 @@ class TestExecutionTrace(TestCase):
                 os.remove(file_path)
 
     def test_execution_trace_start_stop(self, device):
-        use_device = (
-            torch.profiler.ProfilerActivity.CUDA
-            or torch.profiler.ProfilerActivity.XPU in supported_activities()
-            or torch.profiler.ProfilerActivity.HPU in supported_activities()
-        )
+        use_device = USE_DEVICE
         # Create a temp file to save execution trace data.
         with tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp:
             filename = fp.name
@@ -683,11 +678,7 @@ class TestExecutionTrace(TestCase):
             )
 
     def test_execution_trace_repeat_in_loop(self, device):
-        use_device = (
-            torch.profiler.ProfilerActivity.CUDA
-            or torch.profiler.ProfilerActivity.XPU in supported_activities()
-            or torch.profiler.ProfilerActivity.HPU in supported_activities()
-        )
+        use_device = USE_DEVICE
         iter_list = {3, 4, 6, 8}
         expected_loop_events = len(iter_list)
         output_files = []
@@ -772,15 +763,17 @@ class TestExecutionTrace(TestCase):
             raise AssertionError("Expected to find cos node")
 
     @unittest.skipIf(
-        not TEST_CUDA,
-        "need CUDA device availability to run",
+        not torch.accelerator.is_available(),
+        "need accelerator device availability to run",
     )
     @patch.dict(
         os.environ, {"ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE": "1"}
     )
     def test_execution_trace_record_integral_tensor_range(self):
-        t1 = torch.tensor([[1, 2], [3, 4]]).cuda()
-        t2 = torch.tensor([[0, 0], [1, 0]]).cuda()
+        os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE"] = "1"
+        device_type = torch.accelerator.current_accelerator().type
+        t1 = torch.tensor([[1, 2], [3, 4]], device=device_type)
+        t2 = torch.tensor([[0, 0], [1, 0]], device=device_type)
         with (
             tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp,
             profile(
@@ -813,8 +806,8 @@ class TestExecutionTrace(TestCase):
                             )
 
     @unittest.skipIf(
-        not TEST_CUDA,
-        "need CUDA device availability to run",
+        not torch.accelerator.is_available(),
+        "need accelerator device availability to run",
     )
     @patch.dict(
         os.environ,
@@ -827,8 +820,9 @@ class TestExecutionTrace(TestCase):
             et.register_callback(fp_name)
             et.set_extra_resource_collection(True)
 
-            t1 = torch.tensor([[1, 2], [3, 4]]).cuda()
-            t2 = torch.tensor([[0, 0], [1, 0]]).cuda()
+            device_type = torch.accelerator.current_accelerator().type
+            t1 = torch.tensor([[1, 2], [3, 4]], device=device_type)
+            t2 = torch.tensor([[0, 0], [1, 0]], device=device_type)
             with profile(
                 activities=supported_activities(),
                 schedule=torch.profiler.schedule(
@@ -859,6 +853,8 @@ if TEST_XPU:
     devices.append("xpu")
 if TEST_HPU:
     devices.append("hpu")
+if TEST_PRIVATEUSE1:
+    devices.append(TEST_PRIVATEUSE1_DEVICE_TYPE)
 instantiate_device_type_tests(
     TestExecutionTrace, globals(), allow_xpu="xpu" in devices, only_for=devices
 )
