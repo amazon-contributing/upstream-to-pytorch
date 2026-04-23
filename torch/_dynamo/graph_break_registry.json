@@ -1562,6 +1562,14 @@
       ]
     }
   ],
+  "GB5976": [
+    {
+      "Gb_type": "Data pointer comparison",
+      "Context": "call_method {self} {name} {args} {kwargs}",
+      "Explanation": "Dynamo can only trace data pointer comparisons when it can prove both operands have the same data pointer.",
+      "Hints": []
+    }
+  ],
   "GB4695": [
     {
       "Gb_type": "torch.jit.script/freeze modules unsupported",
@@ -1660,6 +1668,24 @@
       "Context": "code name: {code.co_name}, args: {args}",
       "Explanation": "Attempted to inline {code.co_name} where first argument (self) is not a user-defined object.",
       "Hints": []
+    }
+  ],
+  "GB4413": [
+    {
+      "Gb_type": "HOP: Non-nullified side effect",
+      "Context": "Attribute '{name}' was not restored to its original value",
+      "Explanation": "Attribute '{name}' on an outer-scope object was changed from {original} to {current} inside a higher-order op subgraph. Dynamo only supports mutations that are undone before the subgraph exits (e.g., context managers that save/restore a flag). If you intentionally want this side effect, move the mutation outside of the higher-order op.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
+    {
+      "Gb_type": "HOP: Non-nullified side effect",
+      "Context": "Attribute '{name}' was not restored to its original value",
+      "Explanation": "A variable from an outer scope was mutated inside a higher-order op subgraph and not restored to its original value. This is not supported. If using a context manager, ensure it fully restores the original state on exit.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
     }
   ],
   "GB0132": [
