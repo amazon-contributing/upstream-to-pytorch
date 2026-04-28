@@ -530,8 +530,6 @@ user_stack=None)
         del x
         self.assertFalse(guard(weakref_x()))
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
-    @requires_cuda
     def test_call_function_no_args_guard(self):
         if not torch.accelerator.is_available():
             self.skipTest("Accelerator is not available")
