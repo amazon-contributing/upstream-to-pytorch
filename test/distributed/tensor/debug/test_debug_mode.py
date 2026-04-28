@@ -53,6 +53,13 @@ from torch.utils._triton import has_triton_package
 
 def _get_accelerator_memory():
     try:
+        if not torch.accelerator.is_available():
+            return 0
+        device = torch.accelerator.current_accelerator()
+        if not hasattr(torch, device.type) or not hasattr(
+            getattr(torch, device.type), "mem_get_info"
+        ):
+            return 0
         return torch.accelerator.get_memory_info(0)[1]
     except (NotImplementedError):
         return 0  # Return 0, as that would help skip the test is not skipped
