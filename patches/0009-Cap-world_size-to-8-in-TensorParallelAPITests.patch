@@ -1,0 +1,26 @@
+From 74383d1fa19b4f1a842a7a688a935e8bb59ca5b8 Mon Sep 17 00:00:00 2001
+From: Vijay Anand <svskvar@amazon.com>
+Date: Wed, 1 Apr 2026 11:20:02 -0700
+Subject: [PATCH 09/24] Cap world_size to 8 in TensorParallelAPITests
+
+---
+ test/distributed/tensor/parallel/test_parallelize_api.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/test/distributed/tensor/parallel/test_parallelize_api.py b/test/distributed/tensor/parallel/test_parallelize_api.py
+index 15faac839d9..cbe0bbe6982 100644
+--- a/test/distributed/tensor/parallel/test_parallelize_api.py
++++ b/test/distributed/tensor/parallel/test_parallelize_api.py
+@@ -36,7 +36,8 @@ class TensorParallelAPITests(DTensorTestBase):
+     @property
+     def world_size(self):
+         gpu_num = torch.accelerator.device_count()
+-        return gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
++        ws = gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
++        return min(ws, 8)
+ 
+     def _compare_params(
+         self,
+-- 
+2.39.5 (Apple Git-154)
+

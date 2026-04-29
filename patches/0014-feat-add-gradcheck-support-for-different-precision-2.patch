@@ -1,0 +1,65 @@
+From 9f774d4405c2ef40b72ec300afb44f06cf93ebc8 Mon Sep 17 00:00:00 2001
+From: Dixuan Wang <80555409+aws-dixuan@users.noreply.github.com>
+Date: Tue, 7 Apr 2026 14:03:59 -0700
+Subject: [PATCH 14/24] feat: add gradcheck support for different precision
+ (#2)
+
+* feat: add gradcheck support for different precision
+
+* docs: simplify gradcheck default parameters comment
+
+Address CR feedback: remove overly specific numerical analysis from
+the comment and instead clarify that these constants match the existing
+torch.autograd.gradcheck defaults, with a pointer to the source file.
+Keeps the rationale for why they are extracted as overridable constants.
+
+---------
+
+Co-authored-by: Dixuan Wang <dixuan@amazon.com>
+---
+ torch/testing/_internal/common_utils.py | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/torch/testing/_internal/common_utils.py b/torch/testing/_internal/common_utils.py
+index ed299753525..6a698bf1127 100644
+--- a/torch/testing/_internal/common_utils.py
++++ b/torch/testing/_internal/common_utils.py
+@@ -5340,6 +5340,15 @@ class BytesIOContext(io.BytesIO):
+ # For more information see https://github.com/pytorch/pytorch/issues/56202
+ GRADCHECK_NONDET_TOL = 1e-12
+ 
++# Default gradcheck parameters — these match the values already used by
++# torch.autograd.gradcheck (see torch/autograd/gradcheck.py).
++# Extracting them as constants lets privateuse1 backends override them
++# with dtype-appropriate values (e.g. wider tolerances for float32-only
++# hardware) in their test overlay.
++GRADCHECK_DEFAULT_EPS = 1e-6
++GRADCHECK_DEFAULT_ATOL = 1e-5
++GRADCHECK_DEFAULT_RTOL = 1e-3
++
+ TEST_WITH_SLOW_GRADCHECK: bool = TestEnvironment.def_flag(
+     "TEST_WITH_SLOW_GRADCHECK",
+     env_var="PYTORCH_TEST_WITH_SLOW_GRADCHECK",
+@@ -5361,6 +5370,9 @@ def gradcheck(fn, inputs, **kwargs):
+     default_values = {
+         "check_batched_grad": True,
+         "fast_mode": True,
++        "eps": GRADCHECK_DEFAULT_EPS,
++        "atol": GRADCHECK_DEFAULT_ATOL,
++        "rtol": GRADCHECK_DEFAULT_RTOL,
+     }
+ 
+     if TEST_WITH_SLOW_GRADCHECK:
+@@ -5381,6 +5393,9 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
+     default_values = {
+         "check_batched_grad": True,
+         "fast_mode": True,
++        "eps": GRADCHECK_DEFAULT_EPS,
++        "atol": GRADCHECK_DEFAULT_ATOL,
++        "rtol": GRADCHECK_DEFAULT_RTOL,
+     }
+ 
+     if TEST_WITH_SLOW_GRADCHECK:
+-- 
+2.39.5 (Apple Git-154)
+

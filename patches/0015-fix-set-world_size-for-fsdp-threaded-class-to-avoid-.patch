@@ -1,0 +1,61 @@
+From cd2e6af2ba7d0fb6e55e300fa2e93bac3a087d19 Mon Sep 17 00:00:00 2001
+From: aws-abigailfernandes <abigailferns94@gmail.com>
+Date: Tue, 7 Apr 2026 14:38:04 -0700
+Subject: [PATCH 15/24] fix: set world_size for fsdp threaded class to avoid
+ 128 world size (#27)
+
+Co-authored-by: Abigail Fernandes <ferabiga@amazon.com>
+---
+ .../fsdp/test_fully_shard_training.py         |  2 +-
+ torch/testing/_internal/common_fsdp.py        | 21 +++++++++++++++++++
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/test/distributed/_composable/fsdp/test_fully_shard_training.py b/test/distributed/_composable/fsdp/test_fully_shard_training.py
+index 6a61bab2815..be4f264875d 100644
+--- a/test/distributed/_composable/fsdp/test_fully_shard_training.py
++++ b/test/distributed/_composable/fsdp/test_fully_shard_training.py
+@@ -91,7 +91,7 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
+         return 2
+ 
+     def test_root_move_forward_input_to_device(self):
+-        device = torch.device(device_type.type, 0)
++        device = torch.device(device_type.type, self.rank)
+ 
+         class ParamlessModule(nn.Module):
+             def forward(self, x: torch.Tensor, ys: tuple[torch.Tensor, ...]):
+diff --git a/torch/testing/_internal/common_fsdp.py b/torch/testing/_internal/common_fsdp.py
+index 3176aad15e0..138d442355b 100644
+--- a/torch/testing/_internal/common_fsdp.py
++++ b/torch/testing/_internal/common_fsdp.py
+@@ -1765,7 +1765,28 @@ if os.environ.get("PYTORCH_TESTING_PREFER_MULTIPROCESS"):
+     # Some backends may not support multi-threaded test execution.
+     # Setting PYTORCH_TESTING_PREFER_MULTIPROCESS=1 falls back to
+     # multi-process which tests the same FSDP logic with process isolation.
++    # Subclass world_size properties are capped to avoid spawning too many
++    # processes (threads are cheap, processes are not).
++    _PREFER_MULTIPROCESS_MAX_WORLD_SIZE = int(
++        os.environ.get("PYTORCH_TESTING_PREFER_MULTIPROCESS_MAX_WORLD_SIZE", "4")
++    )
++
+     class FSDPTestMultiThread(FSDPTest):  # type: ignore[no-redef]
++        @property
++        def world_size(self):
++            return min(_PREFER_MULTIPROCESS_MAX_WORLD_SIZE, DEVICE_COUNT)
++
++        def __init_subclass__(cls, **kwargs):
++            super().__init_subclass__(**kwargs)
++            if "world_size" in cls.__dict__:
++                orig = cls.__dict__["world_size"]
++                if isinstance(orig, property):
++                    cls.world_size = property(
++                        lambda self, f=orig.fget: min(
++                            _PREFER_MULTIPROCESS_MAX_WORLD_SIZE, f(self)
++                        )
++                    )
++
+         def perThreadSetUp(self):
+             pass
+ 
+-- 
+2.39.5 (Apple Git-154)
+

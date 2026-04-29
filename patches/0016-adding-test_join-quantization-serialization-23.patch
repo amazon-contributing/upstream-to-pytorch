@@ -1,0 +1,182 @@
+From f98a4fd90ab5d2afc8f6f9dc1454adf9b2092201 Mon Sep 17 00:00:00 2001
+From: aws-kingrj <78175353+aws-kingrj@users.noreply.github.com>
+Date: Tue, 7 Apr 2026 15:56:32 -0700
+Subject: [PATCH 16/24] adding test_join, quantization, serialization (#23)
+
+* adding test_join, serialization fixes for device agnostic
+
+Co-authored-by: Ryan King <kingrj@6amazon.com>
+---
+ test/distributed/algorithms/test_join.py | 35 ++++++++++++++----------
+ test/distributed/test_serialization.py   | 12 ++++----
+ 2 files changed, 26 insertions(+), 21 deletions(-)
+
+diff --git a/test/distributed/algorithms/test_join.py b/test/distributed/algorithms/test_join.py
+index e68b5a1682d..b26b33f3342 100644
+--- a/test/distributed/algorithms/test_join.py
++++ b/test/distributed/algorithms/test_join.py
+@@ -16,7 +16,7 @@ if not dist.is_available():
+ from torch.distributed.algorithms.join import Join, Joinable, JoinHook
+ from torch.testing._internal.common_distributed import (
+     MultiProcessTestCase,
+-    require_n_gpus_for_nccl_backend,
++    skip_if_lt_x_gpu,
+ )
+ from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+ 
+@@ -28,8 +28,13 @@ if TEST_WITH_DEV_DBG_ASAN:
+     )
+     sys.exit(0)
+ 
+-BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
+-WORLD_SIZE = min(4, max(2, torch.cuda.device_count()))
++device_type = (
++    acc.type
++    if (acc := torch.accelerator.current_accelerator(check_available=True))
++    else "cpu"
++)
++BACKEND = dist.get_default_backend_for_device(device_type)
++WORLD_SIZE = min(4, max(2, torch.accelerator.device_count() if torch.accelerator.is_available() else 2))
+ 
+ # Constants used for testing post-hooks
+ BEFORE_CONSTANT = 41
+@@ -147,8 +152,8 @@ class TestJoin(MultiProcessTestCase):
+     @property
+     def device(self):
+         return (
+-            torch.device(self.rank)
+-            if BACKEND == dist.Backend.NCCL
++            torch.device(device_type, self.rank)
++            if torch.accelerator.is_available()
+             else torch.device("cpu")
+         )
+ 
+@@ -280,7 +285,7 @@ class TestJoin(MultiProcessTestCase):
+             for allreducer in allreducers:
+                 self.assertEqual(allreducer.post_hook_tensor.item(), AFTER_CONSTANT)
+ 
+-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
++    @skip_if_lt_x_gpu(WORLD_SIZE)
+     def test_single_joinable_main_hooks(self):
+         r"""Tests the main hooks of a single :class:`Joinable`."""
+         num_joinables = 1
+@@ -304,11 +309,11 @@ class TestJoin(MultiProcessTestCase):
+             expected_total=expected_total,
+         )
+ 
+-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
++    @skip_if_lt_x_gpu(WORLD_SIZE)
+     def test_single_joinable_post_hooks(self):
+         r"""Tests the post-hooks of a single :class:`Joinable`."""
+         num_joinables = 1
+-        num_allreduces = 0  # set to 0 to skip the main hooks
++        num_allreduces = 0
+         run_post_hooks = False
+ 
+         self._test_join_base(
+@@ -321,7 +326,7 @@ class TestJoin(MultiProcessTestCase):
+             expected_total=None,
+         )
+ 
+-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
++    @skip_if_lt_x_gpu(WORLD_SIZE)
+     def test_single_joinable(self):
+         r"""
+         Tests the main hooks and post-hooks of a single :class:`Joinable`
+@@ -349,7 +354,7 @@ class TestJoin(MultiProcessTestCase):
+             expected_total=expected_total,
+         )
+ 
+-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
++    @skip_if_lt_x_gpu(WORLD_SIZE)
+     def test_multiple_joinables(self):
+         r"""
+         Tests the main hooks and post-hooks of multiple :class:`Joinable` s
+@@ -378,7 +383,7 @@ class TestJoin(MultiProcessTestCase):
+             expected_total=expected_total,
+         )
+ 
+-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
++    @skip_if_lt_x_gpu(WORLD_SIZE)
+     def test_single_joinable_disable(self):
+         r"""Tests ``enable=False`` for a single :class:`Joinable`."""
+         num_joinables = 1
+@@ -399,7 +404,7 @@ class TestJoin(MultiProcessTestCase):
+             expected_total=expected_total,
+         )
+ 
+-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
++    @skip_if_lt_x_gpu(WORLD_SIZE)
+     def test_multiple_joinable_disable(self):
+         r"""
+         Tests ``enable=False`` for multiple :class:`Joinable` s.
+@@ -425,7 +430,7 @@ class TestJoin(MultiProcessTestCase):
+             expected_total=expected_total,
+         )
+ 
+-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
++    @skip_if_lt_x_gpu(WORLD_SIZE)
+     def test_single_joinable_throw(self):
+         r"""
+         Tests ``throw_on_early_termination=True`` for a single
+@@ -446,7 +451,7 @@ class TestJoin(MultiProcessTestCase):
+             expected_total=None,
+         )
+ 
+-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
++    @skip_if_lt_x_gpu(WORLD_SIZE)
+     def test_multiple_joinables_throw(self):
+         r"""
+         Tests ``throw_on_early_termination=True`` for multiple
+@@ -470,7 +475,7 @@ class TestJoin(MultiProcessTestCase):
+             expected_total=None,
+         )
+ 
+-    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
++    @skip_if_lt_x_gpu(WORLD_SIZE)
+     def test_join_kwargs(self):
+         r"""
+         Tests passing keyword arguments to the context manager.
+diff --git a/test/distributed/test_serialization.py b/test/distributed/test_serialization.py
+index 6c1d82b5c18..4e654839ed6 100644
+--- a/test/distributed/test_serialization.py
++++ b/test/distributed/test_serialization.py
+@@ -2,6 +2,7 @@
+ 
+ import os
+ import pickle
++import unittest
+ from io import BytesIO
+ from typing import cast
+ 
+@@ -9,12 +10,11 @@ import torch
+ import torch.distributed as dist
+ from torch.distributed._serialization import _streaming_load, _streaming_save
+ from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
+-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+-
++from torch.testing._internal.common_utils import run_tests, TestCase
++from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
+ 
+ DEBUG_ENV = "TORCH_SERIALIZATION_DEBUG"
+ 
+-
+ class MyClass:
+     def __init__(self, a: int) -> None:
+         self.a = a
+@@ -164,9 +164,9 @@ class TestSerialization(TestCase):
+         with self.assertRaisesRegex(RuntimeError, "explicit pickle_module"):
+             _streaming_load(file, weights_only=True, pickle_module=pickle)
+ 
+-    @requires_cuda
+-    def test_cuda(self) -> None:
+-        device = torch.device("cuda:0")
++    @requires_accelerator_dist_backend()
++    def test_accelerator(self) -> None:
++        device = torch.device(f"{torch.accelerator.current_accelerator().type}:0")
+ 
+         tensor = torch.tensor(42, dtype=torch.float, device=device)
+         state_dict = {"scalar": tensor}
+-- 
+2.39.5 (Apple Git-154)
+

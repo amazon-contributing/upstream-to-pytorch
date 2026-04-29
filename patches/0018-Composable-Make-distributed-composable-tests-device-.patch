@@ -1,0 +1,258 @@
+From 4bc2bea3a89868cd2103009cb8c0477799c36d8f Mon Sep 17 00:00:00 2001
+From: aws-abigailfernandes <abigailferns94@gmail.com>
+Date: Fri, 10 Apr 2026 10:59:19 -0700
+Subject: [PATCH 18/24] [Composable] Make distributed composable tests
+ device-agnostic for PrivateUse1 (#29)
+
+---
+ .../_composable/test_checkpoint.py            |  4 +--
+ .../distributed/_composable/test_replicate.py |  6 ++++-
+ .../test_replicate_mixed_precision.py         |  2 +-
+ .../_composable/test_replicate_training.py    | 25 +++++++++++--------
+ .../_composable/test_replicate_with_fsdp.py   | 14 +++++------
+ 5 files changed, 30 insertions(+), 21 deletions(-)
+
+diff --git a/test/distributed/_composable/test_checkpoint.py b/test/distributed/_composable/test_checkpoint.py
+index c8d967880bb..6e035b763bf 100644
+--- a/test/distributed/_composable/test_checkpoint.py
++++ b/test/distributed/_composable/test_checkpoint.py
+@@ -26,7 +26,7 @@ class MemoryDelta(ContextDecorator):
+     def __enter__(self):
+         self.active_memory_enter = (
+             torch.accelerator.memory_stats()["active_bytes.all.current"]
+-            if self.device.type == "cuda" or self.device.type == "xpu"
++            if self.device.type in ("cuda", "xpu")
+             else 0
+         )
+         return self
+@@ -34,7 +34,7 @@ class MemoryDelta(ContextDecorator):
+     def __exit__(self, *exc):
+         self.active_memory_exit = (
+             torch.accelerator.memory_stats()["active_bytes.all.current"]
+-            if self.device.type == "cuda" or self.device.type == "xpu"
++            if self.device.type in ("cuda", "xpu")
+             else 0
+         )
+ 
+diff --git a/test/distributed/_composable/test_replicate.py b/test/distributed/_composable/test_replicate.py
+index fa52381e79c..699ce1018f0 100644
+--- a/test/distributed/_composable/test_replicate.py
++++ b/test/distributed/_composable/test_replicate.py
+@@ -15,7 +15,7 @@ from torch.testing._internal.common_distributed import (
+     MultiThreadedTestCase,
+     skip_if_lt_x_gpu,
+ )
+-from torch.testing._internal.common_utils import run_tests, TEST_XPU
++from torch.testing._internal.common_utils import run_tests, TEST_PRIVATEUSE1, TEST_XPU
+ 
+ 
+ device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+@@ -133,6 +133,7 @@ class ReplicateTest(MultiProcContinuousTest):
+ 
+     @skip_if_lt_x_gpu(2)
+     @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
++    @unittest.skipIf(TEST_PRIVATEUSE1, "Gloo does not support PrivateUse1 device tensors")
+     def test_replicate_move_args_kwargs_to_device(self):
+         class MyNet(nn.Module):
+             def __init__(self) -> None:
+@@ -153,6 +154,7 @@ class ReplicateTest(MultiProcContinuousTest):
+ 
+     @skip_if_lt_x_gpu(2)
+     @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
++    @unittest.skipIf(TEST_PRIVATEUSE1, "Gloo does not support PrivateUse1 device tensors")
+     def test_replicate_ignore_module(self):
+         torch.accelerator.set_device_index(self.rank)
+         # Seed ensures diff input and thus different local grads across ranks.
+@@ -198,6 +200,7 @@ class ReplicateTest(MultiProcContinuousTest):
+ 
+     @skip_if_lt_x_gpu(2)
+     @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
++    @unittest.skipIf(TEST_PRIVATEUSE1, "Gloo does not support PrivateUse1 device tensors")
+     def test_replicate_device_id(self):
+         model = Net()
+         model_cuda = deepcopy(model).to(device_type)
+@@ -234,6 +237,7 @@ class ReplicateTest(MultiProcContinuousTest):
+ class ReplicateFullyShardInit(ReplicateTest):
+     @skip_if_lt_x_gpu(2)
+     @unittest.skipIf(TEST_XPU, "XPU does not support gloo backend")
++    @unittest.skipIf(TEST_PRIVATEUSE1, "Gloo does not support PrivateUse1 device tensors")
+     def test_replicate_fully_shard_init(self):
+         class ToyModel(nn.Module):
+             def __init__(self, dim: int):
+diff --git a/test/distributed/_composable/test_replicate_mixed_precision.py b/test/distributed/_composable/test_replicate_mixed_precision.py
+index 0d2cbbd14e2..92662aa0b23 100644
+--- a/test/distributed/_composable/test_replicate_mixed_precision.py
++++ b/test/distributed/_composable/test_replicate_mixed_precision.py
+@@ -547,7 +547,7 @@ class TestReplicateMixedPrecisionCasts(FSDPTestMultiThread):
+             torch.bfloat16, torch.bfloat16, torch.bfloat16, True
+         )
+         model = Model()
+-        inp = Input(torch.randn(2, 10).cuda())
++        inp = Input(torch.randn(2, 10).to(device_type))
+ 
+         replicate(model, mp_policy=mp_policy)
+         loss = model(inp).sum()
+diff --git a/test/distributed/_composable/test_replicate_training.py b/test/distributed/_composable/test_replicate_training.py
+index 24e070fe97a..f8f7d01a68b 100644
+--- a/test/distributed/_composable/test_replicate_training.py
++++ b/test/distributed/_composable/test_replicate_training.py
+@@ -71,7 +71,7 @@ class TestReplicateForwardInputs(FSDPTestMultiThread):
+ 
+     @skip_if_lt_x_gpu(1)
+     def test_root_move_forward_input_to_device(self):
+-        device = torch.device(device_type.type, 0)
++        device = torch.device(device_type.type, self.rank)
+ 
+         class ParamlessModule(nn.Module):
+             def forward(self, x: torch.Tensor, ys: tuple[torch.Tensor, ...]):
+@@ -104,7 +104,7 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
+     @skip_if_lt_x_gpu(1)
+     def test_param_registration_after_forward(self):
+         """Tests the parameter registration after forward."""
+-        device = torch.device(device_type.type, 0)
++        device = torch.device(device_type.type, self.rank)
+         # Single Replicate group
+         torch.manual_seed(42)
+         model = MLP(3, device)
+@@ -153,7 +153,7 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
+     @skip_if_lt_x_gpu(1)
+     def test_param_registration_after_backward(self):
+         """Tests the parameter registration after backward."""
+-        device = torch.device(device_type.type, 0)
++        device = torch.device(device_type.type, self.rank)
+         # Single Replicate group
+         model = MLP(8, device)
+         replicate(model)  # root only
+@@ -367,7 +367,12 @@ class TestReplicate1DTrainingCore(FSDPTest):
+             in (2, 3)
+         ):
+             return
+-        if test_device_type not in ("cuda", "hpu", "xpu", "cpu"):
++        valid_device_types = ("cuda", "hpu", "xpu", "cpu")
++        if hasattr(torch._C, "_get_privateuse1_backend_name"):
++            backend_name = torch._C._get_privateuse1_backend_name()
++            if backend_name != "privateuseone":
++                valid_device_types = valid_device_types + (backend_name,)
++        if test_device_type not in valid_device_types:
+             raise AssertionError(f"Unexpected device type: {test_device_type}")
+         torch.manual_seed(42)
+         vocab_size = 1024
+@@ -406,13 +411,13 @@ class TestReplicate1DTrainingCore(FSDPTest):
+ 
+         def delayed_all_gather(*args, **kwargs):
+             torch.get_device_module(device_type)._sleep(
+-                int(delay_in_ms * get_cycles_per_ms())
++                int(delay_in_ms * get_cycles_per_ms(device_type.type))
+             )
+             return orig_all_gather(*args, **kwargs)
+ 
+         def delayed_reduce_scatter(*args, **kwargs):
+             torch.get_device_module(device_type)._sleep(
+-                int(delay_in_ms * get_cycles_per_ms())
++                int(delay_in_ms * get_cycles_per_ms(device_type.type))
+             )
+             return orig_reduce_scatter(*args, **kwargs)
+ 
+@@ -435,12 +440,12 @@ class TestReplicate1DTrainingCore(FSDPTest):
+                     losses.append(_model(inp).sum())
+                     if _model is model and delay_after_forward:
+                         torch.get_device_module(device_type)._sleep(
+-                            int(delay_in_ms * get_cycles_per_ms())
++                            int(delay_in_ms * get_cycles_per_ms(device_type.type))
+                         )
+                     losses[-1].backward()
+                     if _model is model and delay_before_optim:
+                         torch.get_device_module(device_type)._sleep(
+-                            int(delay_in_ms * get_cycles_per_ms())
++                            int(delay_in_ms * get_cycles_per_ms(device_type.type))
+                         )
+ 
+                 for param in ref_model.parameters():
+@@ -488,7 +493,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
+ 
+         root_loss = model(inp).sum()
+         root_loss.backward()
+-        torch.get_device_module(device_type)._sleep(int(100 * get_cycles_per_ms()))
++        torch.get_device_module(device_type)._sleep(int(100 * get_cycles_per_ms(device_type.type)))
+         optim.step()
+         optim.zero_grad()
+         nonroot_loss = model[0](inp).sum()
+@@ -642,7 +647,7 @@ class TestReplicate1DTrainingCore(FSDPTest):
+             optim.step()
+             # Sleep after the optimizer step to allow CPU to run ahead into the
+             # next iteration's forward, exercising the post-optim stream sync
+-            torch.get_device_module(device_type)._sleep(int(25 * get_cycles_per_ms()))
++            torch.get_device_module(device_type)._sleep(int(25 * get_cycles_per_ms(device_type.type)))
+         for ref_loss, loss in zip(ref_losses, losses):
+             self.assertEqual(ref_loss, loss)
+ 
+diff --git a/test/distributed/_composable/test_replicate_with_fsdp.py b/test/distributed/_composable/test_replicate_with_fsdp.py
+index 6236c93dc6c..f76251165e1 100644
+--- a/test/distributed/_composable/test_replicate_with_fsdp.py
++++ b/test/distributed/_composable/test_replicate_with_fsdp.py
+@@ -24,7 +24,7 @@ from torch.testing._internal.common_distributed import (
+     skip_if_lt_x_gpu,
+     TEST_SKIPS,
+ )
+-from torch.testing._internal.common_fsdp import check_sharded_parity, MLPStack
++from torch.testing._internal.common_fsdp import check_sharded_parity, DEVICE_TYPE, MLPStack
+ from torch.testing._internal.common_utils import run_tests
+ from torch.testing._internal.distributed._tensor.common_dtensor import (
+     ModelArgs,
+@@ -52,7 +52,7 @@ class ReplicateTest(MultiProcContinuousTest):
+ 
+     @classmethod
+     def device_type(cls) -> str:
+-        return "cuda"
++        return DEVICE_TYPE
+ 
+     @classmethod
+     def _init_pg(cls, rank, world_size, rdvz_file):
+@@ -66,7 +66,7 @@ class ReplicateTest(MultiProcContinuousTest):
+         # Prefer to test with >=4 GPUs, but for 2 GPUs, use 2-way TP
+         replicate_size = 2
+         return init_device_mesh(
+-            "cuda",
++            DEVICE_TYPE,
+             (replicate_size, 1, self.world_size // replicate_size),
+             mesh_dim_names=("replicate", "shard", "tp"),
+         )
+@@ -195,7 +195,7 @@ class ReplicateTest(MultiProcContinuousTest):
+         This tests that a user can pass in a device mesh to replicate a module
+         """
+ 
+-        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
++        device = torch.device(DEVICE_TYPE, self.rank % torch.accelerator.device_count())
+         model = Net().to(device)
+         replicate_model = deepcopy(model)
+ 
+@@ -221,7 +221,7 @@ class ReplicateTest(MultiProcContinuousTest):
+         Tests that replicate_model has the same behavior as original model when training
+         """
+ 
+-        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
++        device = torch.device(DEVICE_TYPE, self.rank % torch.accelerator.device_count())
+         model = Net().to(device)
+         replicate_model = deepcopy(model)
+ 
+@@ -291,7 +291,7 @@ class ReplicateTest(MultiProcContinuousTest):
+ 
+         torch.manual_seed(42)
+         model = MLPStack(mlp_dim)
+-        ref_model = copy.deepcopy(model).cuda()
++        ref_model = copy.deepcopy(model).to(DEVICE_TYPE)
+         replicate(ref_model, mesh=replicate_mesh)
+         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=False)
+         model.parallelize(
+@@ -302,7 +302,7 @@ class ReplicateTest(MultiProcContinuousTest):
+         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
+ 
+         torch.manual_seed(42 + replicate_pg.rank() + 1)
+-        device = torch.device("cuda")
++        device = torch.device(DEVICE_TYPE)
+         for iter_idx in range(10):
+             inp = torch.randn((8, mlp_dim), device=device)
+             losses: list[torch.Tensor] = []
+-- 
+2.39.5 (Apple Git-154)
+

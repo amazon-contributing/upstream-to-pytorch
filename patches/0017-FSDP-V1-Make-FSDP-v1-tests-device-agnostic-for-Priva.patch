@@ -1,0 +1,1254 @@
+From 0bf899ece8def75e4ee4912ebee217e1bf673987 Mon Sep 17 00:00:00 2001
+From: aws-abigailfernandes <abigailferns94@gmail.com>
+Date: Tue, 7 Apr 2026 16:41:37 -0700
+Subject: [PATCH 17/24] [FSDP V1] Make FSDP v1 tests device-agnostic for
+ PrivateUse1 backends (#26)
+
+---
+ .../fsdp/test_distributed_checkpoint.py       |  4 +-
+ test/distributed/fsdp/test_fsdp_apply.py      |  3 +-
+ test/distributed/fsdp/test_fsdp_checkpoint.py |  3 +-
+ .../fsdp/test_fsdp_clip_grad_norm.py          |  3 +-
+ test/distributed/fsdp/test_fsdp_comm.py       |  3 +-
+ test/distributed/fsdp/test_fsdp_comm_hooks.py |  3 +-
+ test/distributed/fsdp/test_fsdp_core.py       |  3 +-
+ .../fsdp/test_fsdp_dtensor_state_dict.py      |  4 +-
+ test/distributed/fsdp/test_fsdp_exec_order.py |  4 +-
+ test/distributed/fsdp/test_fsdp_fine_tune.py  |  4 +-
+ test/distributed/fsdp/test_fsdp_fx.py         |  3 +-
+ test/distributed/fsdp/test_fsdp_grad_acc.py   |  3 +-
+ test/distributed/fsdp/test_fsdp_input.py      |  4 +-
+ .../fsdp/test_fsdp_mixed_precision.py         | 88 ++++++++++---------
+ .../fsdp/test_fsdp_multiple_wrapping.py       |  4 +-
+ .../distributed/fsdp/test_fsdp_optim_state.py | 47 +++++-----
+ test/distributed/fsdp/test_fsdp_overlap.py    | 12 +--
+ test/distributed/fsdp/test_fsdp_pure_fp16.py  |  3 +-
+ test/distributed/fsdp/test_fsdp_traversal.py  |  3 +-
+ test/distributed/fsdp/test_fsdp_uneven.py     |  4 +-
+ .../fsdp/test_fsdp_use_orig_params.py         |  6 +-
+ .../fsdp/test_hsdp_dtensor_state_dict.py      |  4 +-
+ test/distributed/fsdp/test_utils.py           |  6 +-
+ test/distributed/fsdp/test_wrap.py            |  4 +-
+ torch/testing/_internal/common_device_type.py | 14 +++
+ torch/testing/_internal/common_distributed.py | 24 +++++
+ torch/testing/_internal/common_fsdp.py        | 36 +++++---
+ 27 files changed, 181 insertions(+), 118 deletions(-)
+
+diff --git a/test/distributed/fsdp/test_distributed_checkpoint.py b/test/distributed/fsdp/test_distributed_checkpoint.py
+index b38ff268b85..19c63777a31 100644
+--- a/test/distributed/fsdp/test_distributed_checkpoint.py
++++ b/test/distributed/fsdp/test_distributed_checkpoint.py
+@@ -10,7 +10,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataP
+ from torch.distributed.fsdp.wrap import enable_wrap, wrap
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+-from torch.testing._internal.common_fsdp import FSDPTestContinuous, SkipModel
++from torch.testing._internal.common_fsdp import FSDP_DEVICES, FSDPTestContinuous, SkipModel
+ from torch.testing._internal.common_utils import (
+     parametrize,
+     run_tests,
+@@ -95,7 +95,7 @@ class TestDistributedCheckpoint(FSDPTestContinuous):
+         # TODO: add resharding test case.
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(
+     TestDistributedCheckpoint, globals(), only_for=devices, allow_xpu=True
+ )
+diff --git a/test/distributed/fsdp/test_fsdp_apply.py b/test/distributed/fsdp/test_fsdp_apply.py
+index de213fb492e..548f9f5ee7a 100644
+--- a/test/distributed/fsdp/test_fsdp_apply.py
++++ b/test/distributed/fsdp/test_fsdp_apply.py
+@@ -9,6 +9,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+ from torch.testing._internal.common_fsdp import (
++    FSDP_DEVICES,
+     DEVICEInitMode,
+     FSDPInitMode,
+     FSDPTestContinuous,
+@@ -113,7 +114,7 @@ class TestApply(FSDPTestContinuous):
+                 transformer.apply(self._init_linear_weights)
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(TestApply, globals(), only_for=devices, allow_xpu=True)
+ if __name__ == "__main__":
+     run_tests()
+diff --git a/test/distributed/fsdp/test_fsdp_checkpoint.py b/test/distributed/fsdp/test_fsdp_checkpoint.py
+index 3c30065da11..1f0731786ba 100644
+--- a/test/distributed/fsdp/test_fsdp_checkpoint.py
++++ b/test/distributed/fsdp/test_fsdp_checkpoint.py
+@@ -19,6 +19,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+ from torch.testing._internal.common_fsdp import (
++    FSDP_DEVICES,
+     _maybe_wrap_fsdp,
+     FSDPTest,
+     FSDPTestContinuous,
+@@ -344,7 +345,7 @@ class TestFSDPCheckpointSubmodule(FSDPTestContinuous):
+             self.assertTrue(p1.grad.allclose(p2.grad))
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(
+     TestFSDPCheckpointSubmodule, globals(), only_for=devices, allow_xpu=True
+ )
+diff --git a/test/distributed/fsdp/test_fsdp_clip_grad_norm.py b/test/distributed/fsdp/test_fsdp_clip_grad_norm.py
+index 5745e17a643..efa6af524e1 100644
+--- a/test/distributed/fsdp/test_fsdp_clip_grad_norm.py
++++ b/test/distributed/fsdp/test_fsdp_clip_grad_norm.py
+@@ -17,6 +17,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+ from torch.testing._internal.common_fsdp import (
++    FSDP_DEVICES,
+     DEVICEInitMode,
+     FSDPInitMode,
+     FSDPTestContinuous,
+@@ -380,7 +381,7 @@ class TestClipGradNorm(FSDPTestContinuous):
+         self.assertEqual(total_norm.dtype, torch.float32)
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(
+     TestClipGradNorm, globals(), only_for=devices, allow_xpu=True
+ )
+diff --git a/test/distributed/fsdp/test_fsdp_comm.py b/test/distributed/fsdp/test_fsdp_comm.py
+index d4fa4073fd9..25fd134201b 100644
+--- a/test/distributed/fsdp/test_fsdp_comm.py
++++ b/test/distributed/fsdp/test_fsdp_comm.py
+@@ -16,6 +16,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+ from torch.testing._internal.common_fsdp import (
++    FSDP_DEVICES,
+     DEVICEInitMode,
+     FSDPInitMode,
+     FSDPTestContinuous,
+@@ -419,7 +420,7 @@ class TestExplicitUnshard(FSDPTestContinuous):
+             self.assertTrue(param.numel() > 0)
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(
+     TestCommunication, globals(), only_for=devices, allow_xpu=True
+ )
+diff --git a/test/distributed/fsdp/test_fsdp_comm_hooks.py b/test/distributed/fsdp/test_fsdp_comm_hooks.py
+index 7f0cc4cdb7e..222c0ce08bd 100644
+--- a/test/distributed/fsdp/test_fsdp_comm_hooks.py
++++ b/test/distributed/fsdp/test_fsdp_comm_hooks.py
+@@ -12,6 +12,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecis
+ from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
+ from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+ from torch.testing._internal.common_distributed import (
++    BFLOAT16_AVAILABLE,
+     requires_accelerator_dist_backend,
+     requires_nccl_version,
+     skip_but_pass_in_sandcastle_if,
+@@ -33,8 +34,6 @@ device_type = (
+     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+ )
+ 
+-BFLOAT16_AVAILABLE = torch.cuda.is_bf16_supported() or torch.xpu.is_bf16_supported()
+-
+ 
+ class Net(nn.Module):
+     def __init__(self, has_wrapping, sharding_strategy, mixed_precision=None):
+diff --git a/test/distributed/fsdp/test_fsdp_core.py b/test/distributed/fsdp/test_fsdp_core.py
+index 0741ebad5ba..3f359024621 100644
+--- a/test/distributed/fsdp/test_fsdp_core.py
++++ b/test/distributed/fsdp/test_fsdp_core.py
+@@ -23,6 +23,7 @@ from torch.distributed.utils import _p_assert
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+ from torch.testing._internal.common_fsdp import (
++    FSDP_DEVICES,
+     AlwaysWrapNestedWrappedModule,
+     DEVICEInitMode,
+     DummyDDP,
+@@ -516,7 +517,7 @@ class TestAutograd(FSDPTest):
+             FlatParamHandle._use_unsharded_views = orig_use_unsharded_views
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(TestHooks, globals(), only_for=devices, allow_xpu=True)
+ instantiate_device_type_tests(
+     TestParityWithDDP, globals(), only_for=devices, allow_xpu=True
+diff --git a/test/distributed/fsdp/test_fsdp_dtensor_state_dict.py b/test/distributed/fsdp/test_fsdp_dtensor_state_dict.py
+index 88a55a2ce89..fda525fb1bb 100644
+--- a/test/distributed/fsdp/test_fsdp_dtensor_state_dict.py
++++ b/test/distributed/fsdp/test_fsdp_dtensor_state_dict.py
+@@ -14,7 +14,7 @@ from torch.distributed.fsdp.api import (
+ )
+ from torch.distributed.tensor import DTensor, Shard
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+-from torch.testing._internal.common_fsdp import get_devtype
++from torch.testing._internal.common_fsdp import FSDP_DEVICES, get_devtype
+ from torch.testing._internal.common_utils import parametrize, run_tests
+ from torch.testing._internal.distributed._tensor.common_dtensor import (
+     DTensorContinuousTestBase,
+@@ -285,7 +285,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
+                 FSDP.optim_state_dict(model, optim)
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(
+     TestFSDPWithDeviceMeshAndDTensor, globals(), only_for=devices, allow_xpu=True
+ )
+diff --git a/test/distributed/fsdp/test_fsdp_exec_order.py b/test/distributed/fsdp/test_fsdp_exec_order.py
+index f9381076053..b9596189631 100644
+--- a/test/distributed/fsdp/test_fsdp_exec_order.py
++++ b/test/distributed/fsdp/test_fsdp_exec_order.py
+@@ -10,7 +10,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+ from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+-from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
++from torch.testing._internal.common_fsdp import FSDP_DEVICES, FSDPTestContinuous, get_devtype
+ from torch.testing._internal.common_utils import (
+     parametrize,
+     run_tests,
+@@ -211,7 +211,7 @@ class TestFSDPExecOrder(FSDPTestContinuous):
+         # an `AssertionError` will be raised above for both sharding strategies
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(
+     TestFSDPExecOrder, globals(), only_for=devices, allow_xpu=True
+ )
+diff --git a/test/distributed/fsdp/test_fsdp_fine_tune.py b/test/distributed/fsdp/test_fsdp_fine_tune.py
+index 0601f24f021..0b1fc53be3d 100644
+--- a/test/distributed/fsdp/test_fsdp_fine_tune.py
++++ b/test/distributed/fsdp/test_fsdp_fine_tune.py
+@@ -17,7 +17,7 @@ from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+ from torch.nn.parallel import DistributedDataParallel as DDP
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+-from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
++from torch.testing._internal.common_fsdp import FSDP_DEVICES, FSDPTestContinuous, get_devtype
+ from torch.testing._internal.common_utils import (
+     run_tests,
+     TEST_CUDA,
+@@ -404,7 +404,7 @@ class TestFSDPFineTune(FSDPTestContinuous):
+                     self.assertEqual(param, ref_param)
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(
+     TestFSDPFineTune, globals(), only_for=devices, allow_xpu=True
+ )
+diff --git a/test/distributed/fsdp/test_fsdp_fx.py b/test/distributed/fsdp/test_fsdp_fx.py
+index ecd979adcfd..fe154325f2d 100644
+--- a/test/distributed/fsdp/test_fsdp_fx.py
++++ b/test/distributed/fsdp/test_fsdp_fx.py
+@@ -2,6 +2,7 @@
+ import torch
+ from torch.distributed.fsdp._trace_utils import _ExecOrderTracer
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
++from torch.testing._internal.common_fsdp import FSDP_DEVICES
+ from torch.testing._internal.common_utils import run_tests, TestCase
+ 
+ 
+@@ -113,7 +114,7 @@ class TestSymbolicTracing(TestCase):
+         self.assertEqual(exec_info.visited_params, set(exec_info.param_forward_order))
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(
+     TestSymbolicTracing, globals(), only_for=devices, allow_xpu=True
+ )
+diff --git a/test/distributed/fsdp/test_fsdp_grad_acc.py b/test/distributed/fsdp/test_fsdp_grad_acc.py
+index 650d0e71c44..e7ba84cf977 100644
+--- a/test/distributed/fsdp/test_fsdp_grad_acc.py
++++ b/test/distributed/fsdp/test_fsdp_grad_acc.py
+@@ -15,6 +15,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
+ )
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+ from torch.testing._internal.common_fsdp import (
++    DEVICE_TYPE,
+     DEVICEInitMode,
+     FSDPInitMode,
+     FSDPTestContinuous,
+@@ -133,7 +134,7 @@ class TestGradAcc(FSDPTestContinuous):
+             deterministic=True,
+             add_bn=False,  # disable BN since the test uses varying batch sizes
+         )
+-        device = torch.device("cuda")
++        device = torch.device(DEVICE_TYPE)
+         optim = torch.optim.SGD(
+             fsdp_model.parameters(),
+             lr=0.01,
+diff --git a/test/distributed/fsdp/test_fsdp_input.py b/test/distributed/fsdp/test_fsdp_input.py
+index 1aafac4ed6b..b92ead1924a 100644
+--- a/test/distributed/fsdp/test_fsdp_input.py
++++ b/test/distributed/fsdp/test_fsdp_input.py
+@@ -8,7 +8,7 @@ from torch.nn import Linear, Module
+ from torch.optim import SGD
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+-from torch.testing._internal.common_fsdp import FSDPTestContinuous
++from torch.testing._internal.common_fsdp import FSDP_DEVICES, FSDPTestContinuous
+ from torch.testing._internal.common_utils import (
+     parametrize,
+     run_tests,
+@@ -73,7 +73,7 @@ class TestInput(FSDPTestContinuous):
+             optim.zero_grad()
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(TestInput, globals(), only_for=devices, allow_xpu=True)
+ if __name__ == "__main__":
+     run_tests()
+diff --git a/test/distributed/fsdp/test_fsdp_mixed_precision.py b/test/distributed/fsdp/test_fsdp_mixed_precision.py
+index 3f83ec3f2e5..e0aa7d91e95 100644
+--- a/test/distributed/fsdp/test_fsdp_mixed_precision.py
++++ b/test/distributed/fsdp/test_fsdp_mixed_precision.py
+@@ -9,7 +9,8 @@ from itertools import product
+ from typing import Any
+ 
+ import torch
+-import torch.cuda.nccl as nccl
++if torch.cuda.is_available():
++    import torch.cuda.nccl as nccl
+ import torch.nn as nn
+ import torch.nn.functional as F
+ from torch import distributed as dist
+@@ -30,6 +31,7 @@ from torch.testing._internal.common_distributed import (
+ )
+ from torch.testing._internal.common_fsdp import (
+     DEVICEInitMode,
++    DEVICE_TYPE,
+     FSDPInitMode,
+     FSDPTest,
+     subtest_name,
+@@ -86,7 +88,7 @@ mp_only_param_and_buf = MixedPrecision(
+ # Nothing is cast (thus param, comm, grad, and buffer should be in the full precision)
+ mp_no_mixed_precision = MixedPrecision()
+ 
+-nccl_supports_bf16 = dist.is_nccl_available() and nccl.version() >= (2, 10)
++nccl_supports_bf16 = dist.is_nccl_available() and torch.cuda.is_available() and nccl.version() >= (2, 10)
+ 
+ mp_configs = [default_mp, mp_only_reduce, mp_only_param_and_buf, mp_no_mixed_precision]
+ if nccl_supports_bf16:
+@@ -249,13 +251,13 @@ class TestFSDPMixedPrecision(FSDPTest):
+                 FSDP(
+                     LinearMixedPrecision(
+                         param_dtype, buffer_name="buffer0", run_checks=run_checks
+-                    ).cuda(),
++                    ).to(DEVICE_TYPE),
+                     *fsdp_args,
+                     **fsdp_kwargs,
+                 ),
+                 LinearMixedPrecision(
+                     param_dtype, buffer_name="buffer1", run_checks=run_checks
+-                ).cuda(),
++                ).to(DEVICE_TYPE),
+             ),
+             *fsdp_args,
+             **fsdp_kwargs,
+@@ -264,7 +266,7 @@ class TestFSDPMixedPrecision(FSDPTest):
+ 
+     def _get_simple_model(self, param_dtype, *fsdp_args, **fsdp_kwargs):
+         model = FSDP(
+-            LinearMixedPrecision(param_dtype).cuda(), *fsdp_args, **fsdp_kwargs
++            LinearMixedPrecision(param_dtype).to(DEVICE_TYPE), *fsdp_args, **fsdp_kwargs
+         )
+         return model
+ 
+@@ -344,7 +346,7 @@ class TestFSDPMixedPrecision(FSDPTest):
+             def forward(self, x):
+                 return self.lin2(self.lin1(x))
+ 
+-        m = MyModel().cuda()
++        m = MyModel().to(DEVICE_TYPE)
+         mp = MixedPrecision(
+             param_dtype=torch.float16,
+             reduce_dtype=torch.float16,
+@@ -377,7 +379,7 @@ class TestFSDPMixedPrecision(FSDPTest):
+         sharding_strategy,
+         enable_sharded_grad_scaler,
+     ):
+-        torch.cuda.set_device(self.rank)
++        torch.get_device_module(DEVICE_TYPE).set_device(self.rank)
+         fsdp_models = [
+             self._get_simple_model(
+                 param_dtype=full_precision_param_dtype,
+@@ -399,7 +401,7 @@ class TestFSDPMixedPrecision(FSDPTest):
+         ]
+         for model in fsdp_models:
+             if not cpu_offload.offload_params:
+-                model.cuda()
++                model.to(DEVICE_TYPE)
+ 
+             # Patch reduce_scatter to add validation for mixed precision types.
+             orig_reduce_scatter = dist.reduce_scatter_tensor
+@@ -415,7 +417,7 @@ class TestFSDPMixedPrecision(FSDPTest):
+ 
+                 for _ in range(3):
+                     inp = torch.randn(
+-                        3, 10, device="cuda", dtype=full_precision_param_dtype
++                        3, 10, device=DEVICE_TYPE, dtype=full_precision_param_dtype
+                     )
+                     # Forward pass of LinearMixedPrecision check casting of
+                     # inputs, params, buffers.
+@@ -590,11 +592,11 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
+             fsdp_model = FSDP(model, mixed_precision=mp_config)
+             optim = torch.optim.SGD(fsdp_model.parameters(), lr=0.1)
+             for _ in range(6):
+-                inp = fsdp_model.module.get_input(torch.device("cuda"))
++                inp = fsdp_model.module.get_input(torch.device(DEVICE_TYPE))
+                 # This would fail if we casted integer module inputs such as for
+                 # embedding tables.
+                 output = fsdp_model(*inp)
+-                loss = fsdp_model.module.get_loss(inp, output).cuda()
++                loss = fsdp_model.module.get_loss(inp, output).to(DEVICE_TYPE)
+                 self.assertEqual(loss.dtype, param_dtype)
+                 fsdp_model.module.run_backward(loss)
+                 optim.step()
+@@ -641,14 +643,14 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
+         End to end test to ensure mixed precision + auto_wrap works
+         for ResNet model.
+         """
+-        resnet_model = torchvision.models.resnet50().cuda()
++        resnet_model = torchvision.models.resnet50().to(DEVICE_TYPE)
+         resnet_model = nn.SyncBatchNorm.convert_sync_batchnorm(
+             resnet_model, process_group=dist.distributed_c10d._get_default_group()
+         )
+         n_bn = sum(
+             1 if isinstance(x, _BatchNorm) else 0 for x in resnet_model.modules()
+         )
+-        inp = torch.ones(1, 3, 1000, 1000, device="cuda")
++        inp = torch.ones(1, 3, 1000, 1000, device=DEVICE_TYPE)
+         mp_config = MixedPrecision(
+             param_dtype=torch.float16,
+             reduce_dtype=torch.float16,
+@@ -707,7 +709,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
+         def never_wrap_policy(*args, **kwargs):
+             return False
+ 
+-        net = BatchNormNet().cuda()
++        net = BatchNormNet().to(DEVICE_TYPE)
+         if convert_sync_bn:
+             net = nn.SyncBatchNorm.convert_sync_batchnorm(net)
+         # FSDP detects that mixed precision + batchnorm will cause issues
+@@ -740,7 +742,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
+         # Overall mixed precision is still enabled
+         self.assertEqual(mp_config, model.mixed_precision)
+ 
+-        inp = torch.randn((1, 2), device="cuda")
++        inp = torch.randn((1, 2), device=DEVICE_TYPE)
+         # Without FSDP BN mixed precision fix, this would result in
+         # RuntimeError: Expected counts to have type Half but got Float
+         # for syncBN
+@@ -783,7 +785,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
+             os.environ["FSDP_USE_FULL_PREC_IN_EVAL"] = (
+                 "1" if use_full_prec_in_eval else "0"
+             )
+-            m = MyModel().cuda()
++            m = MyModel().to(DEVICE_TYPE)
+             m.a = FSDP(m.a, mixed_precision=mp_config)
+             model = FSDP(m, mixed_precision=mp_config)
+             model.eval()
+@@ -814,9 +816,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
+                 DEVICEInitMode.DEVICE_BEFORE,
+                 {"mixed_precision": mp_config},
+             )
+-            inp = model.get_input(torch.device("cuda"))
++            inp = model.get_input(torch.device(DEVICE_TYPE))
+             output = model(*inp)
+-            loss = model.get_loss(inp, output).cuda()
++            loss = model.get_loss(inp, output).to(DEVICE_TYPE)
+             # Loss should be in fp16
+             self.assertEqual(torch.float16, loss.dtype)
+             model.run_backward(loss)
+@@ -827,9 +829,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
+ 
+             # Now in eval mode, loss should be fp32 if use_full_prec_in_eval is set.
+             model.eval()
+-            inp = model.get_input(torch.device("cuda"))
++            inp = model.get_input(torch.device(DEVICE_TYPE))
+             output = model(*inp)
+-            loss = model.get_loss(inp, output).cuda()
++            loss = model.get_loss(inp, output).to(DEVICE_TYPE)
+             expected_dtype = torch.float32 if use_full_prec_in_eval else torch.float16
+             self.assertEqual(expected_dtype, loss.dtype)
+ 
+@@ -859,7 +861,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
+                 mixed_precision=mp_config,
+             )
+ 
+-            inp = torch.randn(3, 10, device="cuda")
++            inp = torch.randn(3, 10, device=DEVICE_TYPE)
+             fsdp_model((inp, self, fsdp_model, mp_config, torch.float32))
+             for buf in fsdp_model.buffers():
+                 self.assertEqual(torch.float16, buf.dtype)
+@@ -939,9 +941,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
+             )
+             model.eval()
+             with patch_reduce_scatter(test_reduce_scatter, torch.float32):
+-                inp = model.get_input(torch.device("cuda"))
++                inp = model.get_input(torch.device(DEVICE_TYPE))
+                 output = model(*inp)
+-                loss = model.get_loss(inp, output).cuda()
++                loss = model.get_loss(inp, output).to(DEVICE_TYPE)
+                 model.run_backward(loss)
+ 
+     @skip_if_lt_x_gpu(2)
+@@ -978,14 +980,14 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
+             model,
+             sharding_strategy=sharding_strategy,
+             mixed_precision=mixed_precision,
+-            device_id=torch.cuda.current_device(),
++            device_id=torch.accelerator.current_device_index(),
+             use_orig_params=use_orig_params,
+         )
+         # Use an input with dtype not equal to the mixed precision
+         # `param_dtype` so that it gets cast
+         x_float = torch.randn(
+             (32, 1024),
+-            device="cuda",
++            device=DEVICE_TYPE,
+             dtype=torch.float32,
+             requires_grad=True,
+         )
+@@ -1020,7 +1022,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
+             nn.Sequential(NonLearnableConv((1, 2, 2, 1), 64)),
+             nn.Sequential(nn.Conv2d(64, 3, 3, padding=1)),
+             nn.Sequential(NonLearnableConv((1, 2, 2, 1), 3)),
+-        ).cuda()
++        ).to(DEVICE_TYPE)
+ 
+         dtype = torch.float16
+         model = FSDP(
+@@ -1037,7 +1039,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
+         )
+ 
+         # Check that we can run forward/backward without dtype errors
+-        x = torch.randn(2, 3, 128, 128, device="cuda")
++        x = torch.randn(2, 3, 128, 128, device=DEVICE_TYPE)
+         out = model(x)
+         out.mean().backward()
+ 
+@@ -1117,7 +1119,7 @@ class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
+ 
+     @skip_if_lt_x_gpu(1)
+     def test_mixed_precision_with_ignored_module(self):
+-        model = ModelWithIgnoredModule().cuda()
++        model = ModelWithIgnoredModule().to(DEVICE_TYPE)
+         float16 = MixedPrecision(param_dtype=torch.float16)
+         model = FSDP(
+             model,
+@@ -1125,7 +1127,7 @@ class TestFSDPMixedPrecisionIgnoredModules(FSDPTest):
+             mixed_precision=float16,
+         )
+ 
+-        x = torch.ones(2, 100, device=torch.cuda.current_device())
++        x = torch.ones(2, 100, device=torch.accelerator.current_device_index())
+ 
+         with self.assertRaisesRegex(RuntimeError, "must have the same dtype"):
+             model(x).sum().backward()
+@@ -1144,9 +1146,9 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
+         model = SaveForwardInputsModel(
+             forward_inputs,
+             cast_forward_inputs=False,
+-        ).cuda()
++        ).to(DEVICE_TYPE)
+         c1, c2 = model.c1, model.c2
+-        x = torch.zeros(2, 100, device="cuda")
++        x = torch.zeros(2, 100, device=DEVICE_TYPE)
+ 
+         # float16 on one submodule and float32 on everything else
+         model.c2 = FSDP(model.c2, mixed_precision=float16)
+@@ -1165,9 +1167,9 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
+ 
+         model = SaveForwardInputsModel(
+             forward_inputs=forward_inputs, cast_forward_inputs=True
+-        ).cuda()
++        ).to(DEVICE_TYPE)
+         c1, c2 = model.c1, model.c2
+-        x = torch.zeros(2, 100, device="cuda")
++        x = torch.zeros(2, 100, device=DEVICE_TYPE)
+ 
+         # float16 on one submodule and float32 on everything else
+         model.c2 = FSDP(model.c2, mixed_precision=float16)
+@@ -1186,8 +1188,8 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
+ 
+         model = SaveForwardInputsModel(
+             forward_inputs=forward_inputs, cast_forward_inputs=False
+-        ).cuda()
+-        x = torch.zeros(2, 100, device="cuda")
++        ).to(DEVICE_TYPE)
++        x = torch.zeros(2, 100, device=DEVICE_TYPE)
+ 
+         # float16 on one submodule and float32 on everything else
+         model.c2 = FSDP(model.c2, mixed_precision=float16)
+@@ -1206,8 +1208,8 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
+ 
+         model = SaveForwardInputsModel(
+             forward_inputs=forward_inputs, cast_forward_inputs=False
+-        ).cuda()
+-        x = torch.zeros(2, 100, device="cuda")
++        ).to(DEVICE_TYPE)
++        x = torch.zeros(2, 100, device=DEVICE_TYPE)
+ 
+         # For submodules with different precisions, right now current design
+         # does not support the case when the root FSDP instance wraps a submodule
+@@ -1230,9 +1232,9 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
+ 
+         model = SaveForwardInputsModel(
+             forward_inputs=forward_inputs, cast_forward_inputs=False
+-        ).cuda()
++        ).to(DEVICE_TYPE)
+         c1, c2 = model.c1, model.c2
+-        x = torch.zeros(2, 100, device="cuda")
++        x = torch.zeros(2, 100, device=DEVICE_TYPE)
+ 
+         model.c2 = FSDP(model.c2, mixed_precision=float16)
+         fsdp = FSDP(model, mixed_precision=float32)
+@@ -1265,14 +1267,14 @@ class TestFSDPDifferentSubmodulePrecision(FSDPTest):
+ 
+             def forward(self, x: torch.Tensor) -> torch.Tensor:
+                 self.forward_inputs["model_input_x"] = x
+-                y = torch.ones(2, 100, device="cuda", dtype=torch.float32)
++                y = torch.ones(2, 100, device=DEVICE_TYPE, dtype=torch.float32)
+                 return self.l2(self.l1(x), y)
+ 
+         forward_inputs: dict[str, torch.Tensor] = {}
+ 
+         float16 = MixedPrecision(param_dtype=torch.float16)
+-        model = ToyModel(forward_inputs).cuda()
+-        x = torch.zeros(2, 100, device="cuda", dtype=torch.float32)
++        model = ToyModel(forward_inputs).to(DEVICE_TYPE)
++        x = torch.zeros(2, 100, device=DEVICE_TYPE, dtype=torch.float32)
+         model.l2 = FSDP(model.l2, mixed_precision=float16)
+         fsdp = FSDP(model, mixed_precision=float16)
+ 
+@@ -1327,7 +1329,7 @@ class TestFSDPTrainEval(FSDPTest):
+                     return self.module(*args, **kwargs)
+                 return self.ema_module(*args, **kwargs)
+ 
+-        device = torch.device("cuda")
++        device = torch.device(DEVICE_TYPE)
+         model = TransformerWithEMA(device=device)
+         policy = ModuleWrapPolicy(
+             {nn.Transformer, nn.TransformerEncoderLayer, nn.TransformerDecoderLayer}
+diff --git a/test/distributed/fsdp/test_fsdp_multiple_wrapping.py b/test/distributed/fsdp/test_fsdp_multiple_wrapping.py
+index 41317745301..9cb1bdc4b06 100644
+--- a/test/distributed/fsdp/test_fsdp_multiple_wrapping.py
++++ b/test/distributed/fsdp/test_fsdp_multiple_wrapping.py
+@@ -8,7 +8,7 @@ from torch.nn import Linear, Module, Sequential
+ from torch.optim import SGD
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+-from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
++from torch.testing._internal.common_fsdp import FSDP_DEVICES, FSDPTestContinuous, get_devtype
+ from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+ 
+ 
+@@ -61,7 +61,7 @@ class TestMultipleWrapping(FSDPTestContinuous):
+         self.assertEqual(output, rewrapped_output)
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(
+     TestMultipleWrapping, globals(), only_for=devices, allow_xpu=True
+ )
+diff --git a/test/distributed/fsdp/test_fsdp_optim_state.py b/test/distributed/fsdp/test_fsdp_optim_state.py
+index a5eda167241..6af8719badf 100644
+--- a/test/distributed/fsdp/test_fsdp_optim_state.py
++++ b/test/distributed/fsdp/test_fsdp_optim_state.py
+@@ -31,6 +31,7 @@ from torch.distributed.optim import _NamedOptimizer
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+ from torch.testing._internal.common_fsdp import (
+     DEVICEInitMode,
++    DEVICE_TYPE,
+     FSDPInitMode,
+     FSDPTest,
+     TransformerWithSharedParams,
+@@ -316,7 +317,7 @@ class TestDummyModel(torch.nn.Module):
+         return self.net4(self.net3(self.net2(self.net1(x))))
+ 
+     def get_input(self):
+-        return torch.rand(8, 8, device="cuda")
++        return torch.rand(8, 8, device=DEVICE_TYPE)
+ 
+ 
+ class TestFSDPOptimState(FSDPTest):
+@@ -331,7 +332,7 @@ class TestFSDPOptimState(FSDPTest):
+         self,
+         wrap: bool,
+         wrap_alt: bool = False,  # ignored if `wrap=False`
+-        device: torch.device = torch.device("cuda"),
++        device: torch.device = torch.device(DEVICE_TYPE),
+         group=None,
+         optim_class: type[torch.optim.Optimizer] = torch.optim.Adam,
+         use_multiple_param_groups: bool = False,
+@@ -365,7 +366,7 @@ class TestFSDPOptimState(FSDPTest):
+     def _init_transformer_model(
+         self,
+         wrap: bool,
+-        device: torch.device = torch.device("cuda"),
++        device: torch.device = torch.device(DEVICE_TYPE),
+         group=None,
+         optim_class: type[torch.optim.Optimizer] = torch.optim.Adam,
+         use_multiple_param_groups: bool = False,
+@@ -392,7 +393,7 @@ class TestFSDPOptimState(FSDPTest):
+         self,
+         model: torch.nn.Module,
+         optim: torch.optim.Optimizer,
+-        device: torch.device = torch.device("cuda"),
++        device: torch.device = torch.device(DEVICE_TYPE),
+         num_iters: int = 1,
+     ) -> list[float]:
+         """Performs a forward pass, backward pass, and optimizer step
+@@ -629,7 +630,7 @@ class TestFSDPOptimState(FSDPTest):
+         :meth:`full_optim_state_dict` match those of :meth:`state_dict` with
+         full ``state_dict_type`` for a non-FSDP-root model with nested FSDP
+         instances and ignored modules."""
+-        device = torch.device("cuda")
++        device = torch.device(DEVICE_TYPE)
+         model = NestedModel().to(device)
+         wrapped_model = NestedModel.wrap(model, ignore_modules=True)
+         # Add checkpointing to ensure optim_state_dict and state_dict strip out
+@@ -654,7 +655,7 @@ class TestFSDPOptimState(FSDPTest):
+         """Tests that :meth:`full_optim_state_dict` raises an error when
+         nonzero ranks are missing the optimizer state for parameters on rank
+         0."""
+-        device = torch.device("cuda")
++        device = torch.device(DEVICE_TYPE)
+         model = NestedModel.wrap(NestedModel().to(device), None)
+         optim_input = list(model.parameters())
+         if self.rank != 0:
+@@ -1207,7 +1208,7 @@ class TestFSDPOptimState(FSDPTest):
+             fsdp_osd = FSDP.sharded_optim_state_dict(model, optim)
+         # Create a new model with the same structure but additional unmanaged
+         # parameters, representing the model for which we want to load
+-        device = torch.device("cuda")
++        device = torch.device(DEVICE_TYPE)
+         model = NestedModel().to(device)
+         model, unmanaged_params = NestedModel.wrap_with_unmanaged_params(
+             model,
+@@ -1565,7 +1566,7 @@ class TestFSDPOptimState(FSDPTest):
+                 # is tensor or float
+                 return self.relu(self.lin2(x))
+ 
+-        model = Model().cuda()
++        model = Model().to(DEVICE_TYPE)
+         model.lin1 = FSDP(model.lin1)
+         model.lin2 = FSDP(model.lin2)
+         fsdp_model = FSDP(model)
+@@ -1574,7 +1575,7 @@ class TestFSDPOptimState(FSDPTest):
+         )  # or any optimizer with "step"
+ 
+         # Run an iteration to construct optimizer state
+-        device = torch.device("cuda")
++        device = torch.device(DEVICE_TYPE)
+         inp = torch.randn((2, 5), device=device)
+         loss = fsdp_model(inp).sum()
+         loss.backward()
+@@ -1617,7 +1618,7 @@ class TestFSDPOptimState(FSDPTest):
+             def __init__(self) -> None:
+                 super().__init__()
+                 torch.manual_seed(0)
+-                self.dense = FSDP(DenseModel().cuda(), use_orig_params=True)
++                self.dense = FSDP(DenseModel().to(DEVICE_TYPE), use_orig_params=True)
+                 if dist.get_rank() == 0:
+                     self.sparse0 = nn.Sequential(nn.Linear(8, 8), nn.ReLU())
+                 else:
+@@ -1631,7 +1632,7 @@ class TestFSDPOptimState(FSDPTest):
+                 dist.all_reduce(sparse)
+                 return self.dense(sparse)
+ 
+-        models = [FakeMPModel().cuda(), FakeMPModel().cuda()]
++        models = [FakeMPModel().to(DEVICE_TYPE), FakeMPModel().to(DEVICE_TYPE)]
+         optims = [
+             torch.optim.Adam(models[0].parameters(), lr=1e-2),
+             _NamedOptimizer(
+@@ -1645,7 +1646,7 @@ class TestFSDPOptimState(FSDPTest):
+         state_dicts = []
+ 
+         # Train one batch and see if optim_state_dict are the same.
+-        batch = torch.rand(5, 8, device=torch.device("cuda"))
++        batch = torch.rand(5, 8, device=torch.device(DEVICE_TYPE))
+         for model, optim in zip(models, optims):
+             # Eagerly initialize the states
+             for param in model.parameters():
+@@ -1667,7 +1668,7 @@ class TestFSDPOptimState(FSDPTest):
+ 
+         # Make optim1 has a different state.
+         for _ in range(5):
+-            batch = torch.rand(5, 8).cuda()
++            batch = torch.rand(5, 8).to(DEVICE_TYPE)
+             loss = models[1](batch).sum()
+             loss.backward()
+             optims[1].step()
+@@ -1697,11 +1698,11 @@ class TestFSDPOptimState(FSDPTest):
+             def forward(self, x):
+                 return self.net1(x)
+ 
+-        model = FSDP(SimpleModel().cuda())
++        model = FSDP(SimpleModel().to(DEVICE_TYPE))
+         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+ 
+         # Train one step to save original optimizer state dict and original optimizer param groups.
+-        batch = torch.rand(3, 2, device=torch.device("cuda"))
++        batch = torch.rand(3, 2, device=torch.device(DEVICE_TYPE))
+         for param in model.parameters():
+             if param.requires_grad:
+                 t = torch.zeros_like(param)
+@@ -1750,7 +1751,7 @@ class TestFSDPOptimState(FSDPTest):
+ 
+     @skip_if_lt_x_gpu(2)
+     def test_with_empty_optimizer_state(self):
+-        model = FSDP(TestDummyModel().cuda())
++        model = FSDP(TestDummyModel().to(DEVICE_TYPE))
+         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+         state_dict = optim.state_dict()
+         gathered_state_dict = FSDP.optim_state_dict(model, optim)
+@@ -1862,7 +1863,7 @@ class TestFSDPOptimState(FSDPTest):
+ 
+     @skip_if_lt_x_gpu(2)
+     def test_interface_arguments(self):
+-        model = FSDP(TestDummyModel().cuda())
++        model = FSDP(TestDummyModel().to(DEVICE_TYPE))
+         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+ 
+         def step():
+@@ -1888,7 +1889,7 @@ class TestFSDPOptimState(FSDPTest):
+         for state in osd["state"].values():
+             for s in state.values():
+                 self.assertFalse(isinstance(s, ShardedTensor))
+-                self.assertFalse(s.is_cuda)
++                self.assertEqual(s.device, torch.device("cpu"))
+ 
+         # Test sharded state_dict without offload_to_cpu
+         with FSDP.state_dict_type(
+@@ -1904,7 +1905,7 @@ class TestFSDPOptimState(FSDPTest):
+                         continue
+                     self.assertTrue(isinstance(s, ShardedTensor))
+                     if s._local_shards[0]:
+-                        self.assertTrue(s._local_shards[0].tensor.is_cuda)
++                        self.assertEqual(s._local_shards[0].tensor.device.type, DEVICE_TYPE)
+ 
+         # Test full state_dict with rank0_only
+         with FSDP.state_dict_type(
+@@ -1924,13 +1925,13 @@ class TestFSDPOptimState(FSDPTest):
+                     for s in state.values():
+                         if s.dim() == 0:
+                             continue
+-                        self.assertFalse(s.is_cuda)
++                        self.assertEqual(s.device, torch.device("cpu"))
+                         self.assertFalse(isinstance(s, ShardedTensor))
+ 
+     @skip_if_lt_x_gpu(2)
+     def test_state_dict_with_none_tensor_state(self):
+         def _run_test(use_orig_params, optimizer_has_tensor_state):
+-            model = FSDP(TestDummyModel().cuda(), use_orig_params=use_orig_params)
++            model = FSDP(TestDummyModel().to(DEVICE_TYPE), use_orig_params=use_orig_params)
+             optimizer_cls = (
+                 torch.optim.Adam if optimizer_has_tensor_state else torch.optim.SGD
+             )
+@@ -1966,7 +1967,7 @@ class TestFSDPOptimState(FSDPTest):
+     def test_with_no_shard(self):
+         def _run_test(use_orig_params: bool) -> None:
+             model = FSDP(
+-                TestDummyModel().cuda(),
++                TestDummyModel().to(DEVICE_TYPE),
+                 sharding_strategy=ShardingStrategy.NO_SHARD,
+                 use_orig_params=use_orig_params,
+             )
+@@ -1993,7 +1994,7 @@ class TestFSDPOptimState(FSDPTest):
+ 
+     @skip_if_lt_x_gpu(2)
+     def test_no_grad(self):
+-        model = TestDummyModel(no_grad=True).cuda()
++        model = TestDummyModel(no_grad=True).to(DEVICE_TYPE)
+         fsdp_model = FSDP(deepcopy(model), use_orig_params=True)
+         fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2)
+ 
+diff --git a/test/distributed/fsdp/test_fsdp_overlap.py b/test/distributed/fsdp/test_fsdp_overlap.py
+index 01749dd2230..041c6114d3c 100644
+--- a/test/distributed/fsdp/test_fsdp_overlap.py
++++ b/test/distributed/fsdp/test_fsdp_overlap.py
+@@ -12,7 +12,7 @@ from torch import distributed as dist, Event
+ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+-from torch.testing._internal.common_fsdp import FSDPTestContinuous
++from torch.testing._internal.common_fsdp import FSDP_DEVICES, FSDPTestContinuous
+ from torch.testing._internal.common_utils import (
+     get_cycles_per_ms,
+     run_tests,
+@@ -53,8 +53,8 @@ class Layer(nn.Module):
+         # Record the fake forward compute time.
+         self.e1.record()
+         if self.sleep_cycles > 0:
+-            if torch.cuda.is_available():
+-                torch.cuda._sleep(self.sleep_cycles)
++            if torch.accelerator.is_available():
++                torch.get_device_module(device_type)._sleep(self.sleep_cycles)
+         if self.optional_param is not None:
+             x = x + self.optional_param  # force the param to be part of the graph
+         self.e2.record()
+@@ -141,8 +141,8 @@ class TestForwardOverlapWorldSizeOne(FSDPTestContinuous):
+                 def _delayed_all_gather(*args, **kwargs):
+                     nonlocal all_gather_called
+                     all_gather_called = True
+-                    if torch.cuda.is_available():
+-                        torch.cuda._sleep(all_gather_cycles)
++                    if torch.accelerator.is_available():
++                        torch.get_device_module(device_type)._sleep(all_gather_cycles)
+                     if not orig_all_gather:
+                         raise AssertionError("Expected orig_all_gather to be truthy")
+                     return orig_all_gather(*args, **kwargs)
+@@ -263,7 +263,7 @@ class TestForwardOverlapWorldSizeTwo(TestForwardOverlapWorldSizeOne):
+         return 2
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(
+     TestForwardOverlapWorldSizeOne, globals(), only_for=devices, allow_xpu=True
+ )
+diff --git a/test/distributed/fsdp/test_fsdp_pure_fp16.py b/test/distributed/fsdp/test_fsdp_pure_fp16.py
+index 3282ef95b35..49b7712a26d 100644
+--- a/test/distributed/fsdp/test_fsdp_pure_fp16.py
++++ b/test/distributed/fsdp/test_fsdp_pure_fp16.py
+@@ -13,6 +13,7 @@ from torch.distributed.fsdp import (
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+ from torch.testing._internal.common_fsdp import (
++    FSDP_DEVICES,
+     DEVICEInitMode,
+     FSDPInitMode,
+     FSDPTestContinuous,
+@@ -151,7 +152,7 @@ class TestPureFP16(FSDPTestContinuous):
+                 self.assertEqual(param.grad.dtype, torch.float16)
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(TestPureFP16, globals(), only_for=devices, allow_xpu=True)
+ if __name__ == "__main__":
+     run_tests()
+diff --git a/test/distributed/fsdp/test_fsdp_traversal.py b/test/distributed/fsdp/test_fsdp_traversal.py
+index eab93b074ee..933a83e42f2 100644
+--- a/test/distributed/fsdp/test_fsdp_traversal.py
++++ b/test/distributed/fsdp/test_fsdp_traversal.py
+@@ -7,6 +7,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+ from torch.testing._internal.common_fsdp import (
++    FSDP_DEVICES,
+     DEVICEInitMode,
+     FSDPInitMode,
+     FSDPTestContinuous,
+@@ -61,7 +62,7 @@ class TestTraversal(FSDPTestContinuous):
+         )
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(
+     TestTraversal, globals(), only_for=devices, allow_xpu=True
+ )
+diff --git a/test/distributed/fsdp/test_fsdp_uneven.py b/test/distributed/fsdp/test_fsdp_uneven.py
+index 4d97f3ac9e4..d8ba5f96191 100644
+--- a/test/distributed/fsdp/test_fsdp_uneven.py
++++ b/test/distributed/fsdp/test_fsdp_uneven.py
+@@ -9,7 +9,7 @@ from torch.nn import Linear
+ from torch.optim import SGD
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+-from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
++from torch.testing._internal.common_fsdp import FSDP_DEVICES, FSDPTestContinuous, get_devtype
+ from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+ 
+ 
+@@ -68,7 +68,7 @@ class TestUnevenParamShard(FSDPTestContinuous):
+             self.assertEqual(ref_weight_out, weight_out)
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(
+     TestUnevenParamShard, globals(), only_for=devices, allow_xpu=True
+ )
+diff --git a/test/distributed/fsdp/test_fsdp_use_orig_params.py b/test/distributed/fsdp/test_fsdp_use_orig_params.py
+index 9c53b982c54..b4fb127d5ec 100644
+--- a/test/distributed/fsdp/test_fsdp_use_orig_params.py
++++ b/test/distributed/fsdp/test_fsdp_use_orig_params.py
+@@ -1396,7 +1396,7 @@ class TestFSDPUseOrigParamsPrefetchWriteback(FSDPTest):
+                 out = self.linear(x)
+                 compute_done.fill_(0)
+                 # Stall compute stream so prefetch writeback overlaps
+-                torch.cuda._sleep(int(1e8))
++                torch.get_device_module(device_type)._sleep(int(1e8))
+                 compute_done.fill_(1)
+                 return out
+ 
+@@ -1438,7 +1438,7 @@ class TestFSDPUseOrigParamsPrefetchWriteback(FSDPTest):
+         finally:
+             FlatParamHandle.pre_unshard = orig_pre_unshard
+ 
+-        torch.cuda.synchronize()
++        torch.accelerator.synchronize()
+         for i, val in enumerate(writeback_reads):
+             self.assertEqual(
+                 val.item(),
+@@ -1484,7 +1484,7 @@ class TestMultiTensorApply(TestCase):
+         # Check that this does not segfault
+         torch._foreach_mul_(size0_tensors, 0.1)
+ 
+-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda and no xpu")
++    @unittest.skipIf(not torch.accelerator.is_available(), "no accelerator")
+     def test_multi_tensor_apply_size0_tensors_cuda(self):
+         size0_tensors = [
+             torch.empty(0, device=device_type) for _ in range(NUM_SIZE0_TENSORS)
+diff --git a/test/distributed/fsdp/test_hsdp_dtensor_state_dict.py b/test/distributed/fsdp/test_hsdp_dtensor_state_dict.py
+index 0d46e9910c1..c891cdf3e0e 100644
+--- a/test/distributed/fsdp/test_hsdp_dtensor_state_dict.py
++++ b/test/distributed/fsdp/test_hsdp_dtensor_state_dict.py
+@@ -17,7 +17,7 @@ from torch.distributed.fsdp.api import (
+ )
+ from torch.distributed.tensor import DTensor, Replicate, Shard
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+-from torch.testing._internal.common_fsdp import get_devtype
++from torch.testing._internal.common_fsdp import FSDP_DEVICES, get_devtype
+ from torch.testing._internal.common_utils import parametrize, run_tests
+ from torch.testing._internal.distributed._tensor.common_dtensor import (
+     DTensorContinuousTestBase,
+@@ -324,7 +324,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorContinuousTestBase):
+                 self.assertIsInstance(state["exp_avg_sq"], torch.Tensor)
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(
+     TestHSDPWithDeviceMeshAndDTensor, globals(), only_for=devices, allow_xpu=True
+ )
+diff --git a/test/distributed/fsdp/test_utils.py b/test/distributed/fsdp/test_utils.py
+index 0a9343ce41a..f60154671f7 100644
+--- a/test/distributed/fsdp/test_utils.py
++++ b/test/distributed/fsdp/test_utils.py
+@@ -14,11 +14,13 @@ from torch.distributed.fsdp._common_utils import _get_param_to_fqns
+ from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
++from torch.testing._internal.common_fsdp import FSDP_DEVICES
+ from torch.testing._internal.common_utils import (
+     parametrize,
+     run_tests,
+     subtest,
+     TEST_HPU,
++    TEST_PRIVATEUSE1,
+     TEST_WITH_DEV_DBG_ASAN,
+     TEST_XPU,
+     TestCase,
+@@ -40,6 +42,8 @@ if TEST_HPU:
+     list_device = "hpu"
+ elif TEST_XPU:
+     list_device = "xpu"
++elif TEST_PRIVATEUSE1:
++    list_device = torch._C._get_privateuse1_backend_name()
+ else:
+     list_device = "cuda"
+ 
+@@ -203,7 +207,7 @@ class TestUtils(TestCase):
+         )
+ 
+ 
+-devices = ("cuda", "hpu", "xpu")
++devices = FSDP_DEVICES
+ instantiate_device_type_tests(TestUtils, globals(), only_for=devices, allow_xpu=True)
+ if __name__ == "__main__":
+     run_tests()
+diff --git a/test/distributed/fsdp/test_wrap.py b/test/distributed/fsdp/test_wrap.py
+index 9c341e0d4f0..06331f02823 100644
+--- a/test/distributed/fsdp/test_wrap.py
++++ b/test/distributed/fsdp/test_wrap.py
+@@ -467,7 +467,7 @@ class TestAutoWrap(TestCase):
+         self.assertEqual(layer.rank, 0)
+         self.assertEqual(layer.world_size, 2)
+ 
+-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test Requires CUDA or XPU")
++    @unittest.skipIf(not torch.accelerator.is_available(), "Test requires accelerator")
+     def test_always_wrap(self):
+         """
+         Test to ensure that if `always_wrap_policy` is
+@@ -732,7 +732,7 @@ class TestAutoWrap(TestCase):
+         self.assertTrue(isinstance(model.module[0], nn.Linear))
+         self.assertTrue(isinstance(model.module[1], nn.ModuleList))
+ 
+-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "Test Requires CUDA or XPU")
++    @unittest.skipIf(not torch.accelerator.is_available(), "Test requires accelerator")
+     @parametrize(
+         "device_init_mode", [DEVICEInitMode.DEVICE_BEFORE, DEVICEInitMode.DEVICE_AFTER]
+     )
+diff --git a/torch/testing/_internal/common_device_type.py b/torch/testing/_internal/common_device_type.py
+index 896e80d9e45..584dfbf3c33 100644
+--- a/torch/testing/_internal/common_device_type.py
++++ b/torch/testing/_internal/common_device_type.py
+@@ -921,11 +921,25 @@ def instantiate_device_type_tests(
+         except_for, only_for, include_lazy, allow_mps, allow_xpu
+     ):
+         class_name = generic_test_class.__name__ + base.device_type.upper()
++        # For PrivateUse1, use the registered backend name so the class name
++        # matches what setUpClass will produce, and set device_type on the
++        # generated class so child processes see the correct device string.
++        pu1_backend_name = None
++        if base.device_type == "privateuse1":
++            backend_name = torch._C._get_privateuse1_backend_name()
++            if backend_name != "privateuseone":
++                class_name = generic_test_class.__name__ + backend_name.upper()
++                pu1_backend_name = backend_name
+ 
+         # type set to Any and suppressed due to unsupported runtime class:
+         # https://github.com/python/mypy/wiki/Unsupported-Python-Features
+         device_type_test_class: Any = type(class_name, (base, generic_test_class), {})
+ 
++        # Set device_type on the generated class for PrivateUse1 so child
++        # processes don't need setUpClass to resolve the backend name.
++        if pu1_backend_name is not None:
++            device_type_test_class.device_type = pu1_backend_name
++
+         # Arrange for setUpClass and tearDownClass methods defined both in the test template
+         # class and in the generic base to be called. This allows device-parameterized test
+         # classes to support setup and teardown.
+diff --git a/torch/testing/_internal/common_distributed.py b/torch/testing/_internal/common_distributed.py
+index 89878e4b071..3fdfa9a30ef 100644
+--- a/torch/testing/_internal/common_distributed.py
++++ b/torch/testing/_internal/common_distributed.py
+@@ -670,6 +670,16 @@ def create_device(interface=None, lazy_init: bool = False):
+         )
+ 
+ 
++def _is_bf16_supported():
++    if torch.accelerator.is_available():
++        device_module = torch.get_device_module(torch.accelerator.current_accelerator())
++        return getattr(device_module, "is_bf16_supported", lambda: False)()
++    return False
++
++
++BFLOAT16_AVAILABLE = _is_bf16_supported()
++
++
+ def get_timeout(test_id) -> int:
+     return TIMEOUT_OVERRIDE.get(test_id.split(".")[-1], TIMEOUT_DEFAULT)
+ 
+@@ -1131,6 +1141,18 @@ class MultiProcessTestCase(TestCase):
+             for pipe in self.pid_to_pipe.values():
+                 pipe.close()
+ 
++    def _kill_surviving_processes(self):
++        """Terminate and kill any processes that haven't exited yet."""
++        for p in self.processes:
++            if p.exitcode is None:
++                p.terminate()
++        for p in self.processes:
++            if p.exitcode is None:
++                p.join(timeout=5)
++                if p.exitcode is None:
++                    p.kill()
++                    p.join(timeout=5)
++
+     def _check_return_codes(self, fn, elapsed_time) -> None:
+         """
+         Checks that the return codes of all spawned processes match, and skips
+@@ -1165,9 +1187,11 @@ class MultiProcessTestCase(TestCase):
+                     f"and exception:\n{error_message}\n"
+                 )
+ 
++            self._kill_surviving_processes()
+             raise RuntimeError(error)
+         # If no process exited uncleanly, we check for timeouts, and then ensure
+         # each process exited cleanly.
++        self._kill_surviving_processes()
+         for i, p in enumerate(self.processes):
+             if p.exitcode is None:
+                 raise RuntimeError(
+diff --git a/torch/testing/_internal/common_fsdp.py b/torch/testing/_internal/common_fsdp.py
+index 138d442355b..bf260410f42 100644
+--- a/torch/testing/_internal/common_fsdp.py
++++ b/torch/testing/_internal/common_fsdp.py
+@@ -85,7 +85,10 @@ elif TEST_PRIVATEUSE1:
+     DISTRIBUTED_BACKEND = torch.distributed.get_default_backend_for_device(
+         TEST_PRIVATEUSE1_DEVICE_TYPE
+     )
+-    DEVICE_COUNT = torch.get_device_module(TEST_PRIVATEUSE1_DEVICE_TYPE).device_count()
++    DEVICE_COUNT = min(
++        int(os.environ.get("WORLD_SIZE", "8")),
++        torch.get_device_module(TEST_PRIVATEUSE1_DEVICE_TYPE).device_count(),
++    )
+ elif TEST_HPU:
+     DEVICE_TYPE = "hpu:0"
+     DISTRIBUTED_BACKEND = "hccl"
+@@ -98,6 +101,11 @@ else:
+     DISTRIBUTED_BACKEND = "gloo"
+     DEVICE_COUNT = 1
+ 
++# Device types supported by FSDP device-type-parameterized tests.
++FSDP_DEVICES = ("cuda", "hpu", "xpu")
++if TEST_PRIVATEUSE1:
++    FSDP_DEVICES = FSDP_DEVICES + (DEVICE_TYPE,)
++
+ 
+ class FSDPInitMode(Enum):
+     # No FSDP wrapping
+@@ -1266,12 +1274,13 @@ class FSDPTestMixin:
+ 
+         torch._dynamo.reset()
+         set_rng_seed()
+-        self.run_test(test_name, pipe)
+-        torch._dynamo.reset()
+-
+-        dist.barrier(device_ids=device_ids)
+-
+-        dist.destroy_process_group()
++        try:
++            self.run_test(test_name, pipe)
++        finally:
++            torch._dynamo.reset()
++            if dist.is_initialized():
++                dist.barrier(device_ids=device_ids)
++                dist.destroy_process_group()
+ 
+     def _train_for_several_steps(
+         self,
+@@ -1611,12 +1620,13 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
+ 
+         torch._dynamo.reset()
+         set_rng_seed()
+-        self.run_test(test_name, pipe)
+-        torch._dynamo.reset()
+-
+-        dist.barrier(device_ids=device_ids)
+-
+-        dist.destroy_process_group()
++        try:
++            self.run_test(test_name, pipe)
++        finally:
++            torch._dynamo.reset()
++            if dist.is_initialized():
++                dist.barrier(device_ids=device_ids)
++                dist.destroy_process_group()
+ 
+ 
+ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
+-- 
+2.39.5 (Apple Git-154)
+

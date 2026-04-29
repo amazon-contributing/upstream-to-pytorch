@@ -1,0 +1,39 @@
+From 75170ea0437421a4c13dae348d240c3d3453b4b0 Mon Sep 17 00:00:00 2001
+From: Vijay Anand <svskvar@amazon.com>
+Date: Tue, 17 Mar 2026 12:20:03 -0700
+Subject: [PATCH 04/24] Support bf16 compress hooks for accelerator backends
+ beyond CUDA/XPU
+
+Generalized bf16 compress hooks to work with any accelerator backend which supports is_bf16_supported
+---
+ torch/nn/parallel/distributed.py | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/torch/nn/parallel/distributed.py b/torch/nn/parallel/distributed.py
+index ad3e4b36890..8689e640d96 100644
+--- a/torch/nn/parallel/distributed.py
++++ b/torch/nn/parallel/distributed.py
+@@ -2425,6 +2425,11 @@ class DistributedDataParallel(Module, Joinable):
+             )
+ 
+         if hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook"]:
++            bf16_supported = False
++            if torch.accelerator.is_available():
++                device_module = torch.get_device_module(torch.accelerator.current_accelerator())
++                bf16_supported = getattr(device_module, 'is_bf16_supported', lambda: False)()
++
+             cuda_supported = (
+                 torch.version.cuda is not None
+             ) or torch.version.hip is not None
+@@ -2439,7 +2444,7 @@ class DistributedDataParallel(Module, Joinable):
+                 and torch.xpu.is_available()
+             )
+ 
+-            if not ((cuda_supported and nccl_supported) or xpu_xccl_supported):
++            if not (bf16_supported or (cuda_supported and nccl_supported) or xpu_xccl_supported):
+                 self._log_and_throw(
+                     TypeError,
+                     "BF16 all reduce communication hook required CUDA 11+ and NCCL 2.10+ or XPU and XCCL",
+-- 
+2.39.5 (Apple Git-154)
+

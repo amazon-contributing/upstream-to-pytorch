@@ -1,0 +1,121 @@
+From 84adf11d80a147811a400f09cc63826e8ab220ba Mon Sep 17 00:00:00 2001
+From: Qian Qu <quqian@amazon.com>
+Date: Fri, 17 Apr 2026 18:38:58 -0700
+Subject: [PATCH 20/24] test: Add privateuse1 device support to test
+ instantiation (#37)
+
+Add privateuse1 to device type test bases in test_parametrization,
+test_transformers, and test_dataloader so that PrivateUse1 backends
+can run device-specific tests.
+---
+ test/nn/test_parametrization.py |  2 +-
+ test/test_dataloader.py         | 19 ++++++++++++-------
+ test/test_transformers.py       |  2 ++
+ 3 files changed, 15 insertions(+), 8 deletions(-)
+
+diff --git a/test/nn/test_parametrization.py b/test/nn/test_parametrization.py
+index 5dca91f0d2c..63419c4e6e4 100644
+--- a/test/nn/test_parametrization.py
++++ b/test/nn/test_parametrization.py
+@@ -1917,7 +1917,7 @@ class TestNNParametrizationDevice(NNTestCase):
+             self.assertEqual(m(input), expected_output)
+ 
+ 
+-only_for = ("cpu", "cuda")
++only_for = ("cpu", "cuda", "privateuse1")
+ instantiate_device_type_tests(TestNNParametrizationDevice, globals(), only_for=only_for)
+ instantiate_parametrized_tests(TestNNParametrization)
+ 
+diff --git a/test/test_dataloader.py b/test/test_dataloader.py
+index df5c53b08d7..b180e622912 100644
+--- a/test/test_dataloader.py
++++ b/test/test_dataloader.py
+@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
+     slowTest,
+     TEST_CUDA,
+     TEST_NUMPY,
++    TEST_PRIVATEUSE1,
+     TEST_WITH_ASAN,
+     TEST_WITH_TSAN,
+     TestCase,
+@@ -98,7 +99,11 @@ TEST_CUDA_IPC = (
+     #    and not TEST_WITH_ROCM
+ )  # https://github.com/pytorch/pytorch/issues/90940
+ 
+-TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
++TEST_PRIVATEUSE1_IPC = (
++    TEST_PRIVATEUSE1
++    and sys.platform != "darwin"
++    and sys.platform != "win32"
++)
+ 
+ # We want to use `spawn` if able because some of our tests check that the
+ # data loader terminates gracefully. To prevent hanging in the testing
+@@ -1405,7 +1410,7 @@ except RuntimeError as e:
+             self.assertTrue(input.is_pinned())
+             self.assertTrue(target.is_pinned())
+ 
+-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
++    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_PRIVATEUSE1_IPC), "CUDA/PrivateUse1 IPC not available")
+     def test_multiple_dataloaders(self):
+         for multiprocessing_context in supported_multiprocessing_contexts:
+             loader1_it = iter(self._get_data_loader(self.dataset, num_workers=1))
+@@ -1896,7 +1901,7 @@ except RuntimeError as e:
+         ):
+             list(iter(ChainDataset([dataset1, self.dataset])))
+ 
+-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
++    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_PRIVATEUSE1_IPC), "CUDA/PrivateUse1 IPC not available")
+     def test_multiprocessing_contexts(self):
+         reference = [
+             torch.arange(3),
+@@ -1984,13 +1989,13 @@ except RuntimeError as e:
+                 )
+ 
+     @skipIfNoNumpy
+-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
++    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_PRIVATEUSE1_IPC), "CUDA/PrivateUse1 IPC not available")
+     def test_multiprocessing_iterdatapipe(self):
+         self._test_multiprocessing_iterdatapipe(with_dill=False)
+ 
+     @unittest.expectedFailure
+     @skipIfNoNumpy
+-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
++    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_PRIVATEUSE1_IPC), "CUDA/PrivateUse1 IPC not available")
+     @skipIfNoDill
+     def test_multiprocessing_iterdatapipe_with_dill(self):
+         self._test_multiprocessing_iterdatapipe(with_dill=True)
+@@ -3064,7 +3069,7 @@ class TestDataLoaderDeviceType(TestCase):
+         "context",
+         [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
+     )
+-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
++    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_PRIVATEUSE1_IPC), "CUDA/PrivateUse1 IPC not available")
+     def test_nested_tensor_multiprocessing(self, device, context):
+         # The 'fork' multiprocessing context doesn't work for CUDA so skip it
+         if "cuda" in device and context == "fork":
+@@ -3112,7 +3117,7 @@ class TestDataLoaderDeviceType(TestCase):
+         "context",
+         [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
+     )
+-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
++    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_PRIVATEUSE1_IPC), "CUDA/PrivateUse1 IPC not available")
+     def test_sparse_tensor_multiprocessing(self, device, context):
+         # The 'fork' multiprocessing context doesn't work for CUDA so skip it
+         if "cuda" in device and context == "fork":
+diff --git a/test/test_transformers.py b/test/test_transformers.py
+index ced9b0133e1..ece8eed69f2 100644
+--- a/test/test_transformers.py
++++ b/test/test_transformers.py
+@@ -5248,6 +5248,8 @@ else:
+ if TEST_XPU:
+     device_types += ("xpu", )
+ 
++device_types += ("privateuse1", )
++
+ instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types)
+ instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True)
+ instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
+-- 
+2.39.5 (Apple Git-154)
+

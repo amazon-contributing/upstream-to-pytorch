@@ -1,0 +1,329 @@
+From 78506fb0a924e8ad4131634f4eb2fd5d7ede9a90 Mon Sep 17 00:00:00 2001
+From: Vijay Anand <svskvar@amazon.com>
+Date: Mon, 23 Mar 2026 18:36:46 -0700
+Subject: [PATCH 07/24] Make Checkpoint Tests Backend Agnostic
+
+---
+ .../_experimental/test_checkpoint_reader.py   |  2 +-
+ .../checkpoint/_experimental/test_staging.py  | 64 +++++++++++--------
+ .../checkpoint/e2e/test_e2e_save_and_load.py  |  2 +-
+ .../test_file_system_checkpoint_cpu.py        |  8 ++-
+ .../distributed/checkpoint/test_state_dict.py |  2 +-
+ .../checkpoint/test_state_dict_stager.py      |  5 +-
+ .../_shard/sharded_tensor/_ops/binary_cmp.py  | 12 +++-
+ torch/testing/_internal/common_utils.py       |  4 ++
+ .../_shard/sharded_tensor/__init__.py         |  6 +-
+ 9 files changed, 67 insertions(+), 38 deletions(-)
+
+diff --git a/test/distributed/checkpoint/_experimental/test_checkpoint_reader.py b/test/distributed/checkpoint/_experimental/test_checkpoint_reader.py
+index 70d1d30facd..0ea074ce2a4 100644
+--- a/test/distributed/checkpoint/_experimental/test_checkpoint_reader.py
++++ b/test/distributed/checkpoint/_experimental/test_checkpoint_reader.py
+@@ -112,7 +112,7 @@ class TestCheckpointReader(TestCase):
+     def test_read_with_map_location(self):
+         """Test that read correctly uses the map_location parameter."""
+         # Call read with map_location='cpu'
+-        map_location = "cuda" if torch.cuda.is_available() else "cpu"
++        map_location = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
+         read_state_dict, _ = self.reader.read(
+             self.checkpoint_path, map_location=map_location
+         )
+diff --git a/test/distributed/checkpoint/_experimental/test_staging.py b/test/distributed/checkpoint/_experimental/test_staging.py
+index 739d098a899..b6229c5cec1 100644
+--- a/test/distributed/checkpoint/_experimental/test_staging.py
++++ b/test/distributed/checkpoint/_experimental/test_staging.py
+@@ -7,8 +7,7 @@ from torch.distributed.checkpoint._experimental.staging import (
+     CheckpointStagerConfig,
+     DefaultStager,
+ )
+-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+-
++from torch.testing._internal.common_utils import run_tests, TestCase, requires_accelerator
+ 
+ class TestDefaultStager(TestCase):
+     def setUp(self) -> None:
+@@ -23,7 +22,7 @@ class TestDefaultStager(TestCase):
+             "nested": {"inner_tensor": torch.ones(2, 2), "inner_value": 42},
+         }
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_sync_staging(self) -> None:
+         """Test synchronous staging."""
+         options = CheckpointStagerConfig(use_async_staging=False)
+@@ -46,7 +45,7 @@ class TestDefaultStager(TestCase):
+         # Clean up
+         stager.close()
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_async_staging(self) -> None:
+         """Test asynchronous staging."""
+         options = CheckpointStagerConfig(use_async_staging=True)
+@@ -70,10 +69,12 @@ class TestDefaultStager(TestCase):
+         # Clean up
+         stager.close()
+ 
+-    def test_cuda_non_blocking_without_cuda(self) -> None:
+-        """Test that non-blocking copy fails when CUDA is not available."""
+-        if torch.cuda.is_available():
+-            self.skipTest("CUDA is available, cannot test CUDA unavailable scenario")
++    def test_non_blocking_without_accelerator(self) -> None:
++        """Test that non-blocking copy fails when no accelerator is available."""
++        if torch.accelerator.is_available():
++            self.skipTest(
++                "Accelerator is available, cannot test unavailable scenario"
++            )
+ 
+         options = CheckpointStagerConfig(use_non_blocking_copy=True)
+         with self.assertRaises(AssertionError):
+@@ -81,6 +82,8 @@ class TestDefaultStager(TestCase):
+ 
+     def test_different_option_combinations(self) -> None:
+         """Test various combinations of staging options."""
++        has_accelerator = torch.accelerator.is_available()
++
+         test_cases = [
+             # All disabled
+             CheckpointStagerConfig(
+@@ -105,23 +108,23 @@ class TestDefaultStager(TestCase):
+             ),
+         ]
+ 
+-        if torch.cuda.is_available():
++        if has_accelerator:
+             # Only async staging
+             test_cases.append(
+                 CheckpointStagerConfig(
+-                    use_pinned_memory=torch.accelerator.is_available(),
++                    use_pinned_memory=True,
+                     use_shared_memory=False,
+                     use_async_staging=True,
+                     use_non_blocking_copy=False,
+                 )
+             )
+-            # Only CUDA non-blocking copy
++            # Only non-blocking copy
+             test_cases.append(
+                 CheckpointStagerConfig(
+-                    use_pinned_memory=torch.accelerator.is_available(),
++                    use_pinned_memory=True,
+                     use_shared_memory=False,
+                     use_async_staging=False,
+-                    use_non_blocking_copy=torch.accelerator.is_available(),
++                    use_non_blocking_copy=True,
+                 )
+             )
+ 
+@@ -130,7 +133,7 @@ class TestDefaultStager(TestCase):
+                 stager = DefaultStager(options)
+ 
+                 # Test staging works with these options
+-                if options.use_async_staging and torch.accelerator.is_available():
++                if options.use_async_staging and has_accelerator:
+                     result = stager.stage(self.state_dict)
+                     self.assertIsInstance(result, Future)
+                     staged_dict = result.result()
+@@ -142,34 +145,37 @@ class TestDefaultStager(TestCase):
+ 
+                 stager.close()
+ 
+-    @requires_cuda
+-    def test_cuda_tensors_staging(self) -> None:
+-        """Test staging with CUDA tensors."""
+-        # Create state dict with CUDA tensors
+-        cuda_state_dict = {
+-            "cuda_tensor": torch.randn(3, 4).cuda(),
++    @requires_accelerator
++    def test_accelerator_tensors_staging(self) -> None:
++        """Test staging with accelerator tensors."""
++        device = torch.accelerator.current_accelerator()
++
++        # Create state dict with accelerator tensors
++        device_state_dict = {
++            "device_tensor": torch.randn(3, 4).to(device),
+             "cpu_tensor": torch.randn(2, 3),
+             "mixed_model": {
+-                "weight": torch.randn(5, 5).cuda(),
+-                "bias": torch.randn(5).cuda(),
++                "weight": torch.randn(5, 5).to(device),
++                "bias": torch.randn(5).to(device),
+             },
+         }
+ 
+         options = CheckpointStagerConfig(use_async_staging=False)
+         stager = DefaultStager(options)
+ 
+-        staged_dict = stager.stage(cuda_state_dict)
++        # Stage the state dict
++        staged_dict = stager.stage(device_state_dict)
+         if not isinstance(staged_dict, dict):
+             raise AssertionError(f"Expected dict, got {type(staged_dict)}")
+ 
+         # Verify tensors are staged (should be moved to CPU)
+-        self.assertIn("cuda_tensor", staged_dict)
++        self.assertIn("device_tensor", staged_dict)
+         self.assertIn("cpu_tensor", staged_dict)
+         self.assertIn("mixed_model", staged_dict)
+ 
+         stager.close()
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_resource_cleanup(self) -> None:
+         """Test that resources are properly cleaned up."""
+         options = CheckpointStagerConfig(use_async_staging=False)
+@@ -183,11 +189,13 @@ class TestDefaultStager(TestCase):
+ 
+     def test_multiple_staging_operations(self) -> None:
+         """Test multiple staging operations with the same stager."""
++        has_accelerator = torch.accelerator.is_available()
++
+         options = CheckpointStagerConfig(
+             use_async_staging=False,
+-            use_pinned_memory=torch.accelerator.is_available(),
++            use_pinned_memory=has_accelerator,
+             use_shared_memory=False,
+-            use_non_blocking_copy=torch.accelerator.is_available(),
++            use_non_blocking_copy=has_accelerator,
+         )
+         stager = DefaultStager(options)
+ 
+@@ -215,4 +223,4 @@ class TestDefaultStager(TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    run_tests()
++    run_tests()
+\ No newline at end of file
+diff --git a/test/distributed/checkpoint/e2e/test_e2e_save_and_load.py b/test/distributed/checkpoint/e2e/test_e2e_save_and_load.py
+index c3f16b9473f..5774540ca65 100644
+--- a/test/distributed/checkpoint/e2e/test_e2e_save_and_load.py
++++ b/test/distributed/checkpoint/e2e/test_e2e_save_and_load.py
+@@ -512,7 +512,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
+ class TestNoCPU(DTensorTestBase):
+     @property
+     def backend(self):
+-        return "nccl"
++        return dist.get_default_backend_for_device(device_type)
+ 
+     @with_comms
+     def test_no_cpu(self):
+diff --git a/test/distributed/checkpoint/test_file_system_checkpoint_cpu.py b/test/distributed/checkpoint/test_file_system_checkpoint_cpu.py
+index 9963567f5f2..f484423cd35 100644
+--- a/test/distributed/checkpoint/test_file_system_checkpoint_cpu.py
++++ b/test/distributed/checkpoint/test_file_system_checkpoint_cpu.py
+@@ -428,14 +428,18 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
+             ],
+         )
+ 
+-        model_to_save = MyShardedModel3(src_spec).cuda(dist.get_rank())
++        device = torch.device(
++            f"{torch.accelerator.current_accelerator()}:{dist.get_rank()}"
++        )
++
++        model_to_save = MyShardedModel3(src_spec).to(device)
+         model_to_save._register_state_dict_hook(state_dict_hook)
+         state_dict_to_save = model_to_save.state_dict()
+ 
+         fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
+         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
+ 
+-        model_to_load = MyShardedModel3(dst_spec).cuda(dist.get_rank())
++        model_to_load = MyShardedModel3(dst_spec).to(device)
+         model_to_load._register_state_dict_hook(state_dict_hook)
+         state_dict_to_load_to = model_to_load.state_dict()
+ 
+diff --git a/test/distributed/checkpoint/test_state_dict.py b/test/distributed/checkpoint/test_state_dict.py
+index 6bfea439468..bb58b22e636 100644
+--- a/test/distributed/checkpoint/test_state_dict.py
++++ b/test/distributed/checkpoint/test_state_dict.py
+@@ -1098,7 +1098,7 @@ class TestNoComm(MultiProcessTestCase):
+             model, options=StateDictOptions(full_state_dict=True, cpu_offload=True)
+         )
+         for v in msd.values():
+-            self.assertFalse(v.is_cuda)
++            self.assertEqual(v.device, torch.device("cpu"))
+         self.assertEqual(model.state_dict(), msd)
+         set_model_state_dict(model, model.state_dict())
+         osd = get_optimizer_state_dict(
+diff --git a/test/distributed/checkpoint/test_state_dict_stager.py b/test/distributed/checkpoint/test_state_dict_stager.py
+index 8e3baf6ea3e..4cc16a2a98c 100644
+--- a/test/distributed/checkpoint/test_state_dict_stager.py
++++ b/test/distributed/checkpoint/test_state_dict_stager.py
+@@ -923,7 +923,10 @@ class TestReplicationStager(DTensorTestBase):
+ 
+     @property
+     def backend(self) -> str:
+-        return "cpu:gloo,cuda:nccl"
++        if device_type == "cpu":
++            return "cpu:gloo"
++        acc_backend = dist.get_default_backend_for_device(device_type)
++        return f"cpu:gloo,{device_type}:{acc_backend}"
+ 
+     def _create_simple_state_dict(self, rank: int) -> dict:
+         """
+diff --git a/torch/distributed/_shard/sharded_tensor/_ops/binary_cmp.py b/torch/distributed/_shard/sharded_tensor/_ops/binary_cmp.py
+index 0548b81fb90..9df7f1ec40f 100644
+--- a/torch/distributed/_shard/sharded_tensor/_ops/binary_cmp.py
++++ b/torch/distributed/_shard/sharded_tensor/_ops/binary_cmp.py
+@@ -7,15 +7,21 @@ from torch.distributed._shard.sharded_tensor import _sharded_op_impl, ShardedTen
+ 
+ def _communicate_result(result, pg):
+     # Gather results from all ranks.
++    device = None
++    if torch.accelerator.is_available():
++        device = torch.device(
++            torch.accelerator.current_accelerator().type,
++            torch.accelerator.current_device_index()
++        )
+     if result:
+-        result_tensor = torch.ones(1, device=torch.device(torch.cuda.current_device()))
++        result_tensor = torch.ones(1, device=device)
+     else:
+-        result_tensor = torch.zeros(1, device=torch.device(torch.cuda.current_device()))
++        result_tensor = torch.zeros(1, device=device)
+ 
+     dist.all_reduce(result_tensor, group=pg)
+ 
+     expected_result = torch.ones(
+-        1, device=torch.device(torch.cuda.current_device())
++        1, device=device
+     ) * dist.get_world_size(pg)
+ 
+     return torch.equal(result_tensor, expected_result)
+diff --git a/torch/testing/_internal/common_utils.py b/torch/testing/_internal/common_utils.py
+index 193f8085c70..aef74d7ff9d 100644
+--- a/torch/testing/_internal/common_utils.py
++++ b/torch/testing/_internal/common_utils.py
+@@ -1649,6 +1649,10 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
+     torch.cuda.set_per_process_memory_fraction(round((gb_available - num_procs * .85) / gb_available / num_procs, 2))
+ 
+ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
++requires_accelerator = unittest.skipUnless(
++    torch.accelerator.is_available(),
++    "No accelerator available",
++)
+ 
+ def skipIfCrossRef(fn):
+     @wraps(fn)
+diff --git a/torch/testing/_internal/distributed/_shard/sharded_tensor/__init__.py b/torch/testing/_internal/distributed/_shard/sharded_tensor/__init__.py
+index 60c744ac1a8..7f52a7b94e3 100644
+--- a/torch/testing/_internal/distributed/_shard/sharded_tensor/__init__.py
++++ b/torch/testing/_internal/distributed/_shard/sharded_tensor/__init__.py
+@@ -23,7 +23,11 @@ class ShardedTensorTestBase(MultiProcessTestCase):
+ 
+     def init_pg(self, backend="nccl"):
+         if backend not in ["nccl", "gloo", "mpi", "hccl"]:
+-            raise RuntimeError(f"Backend {backend} not supported!")
++            if torch.accelerator.is_available():
++                device_type = torch.accelerator.current_accelerator().type
++                backend = dist.Backend.default_device_backend_map[device_type]
++            else:
++                raise RuntimeError(f"Backend {backend} not supported!")
+ 
+         dist.init_process_group(
+             backend=backend,
+-- 
+2.39.5 (Apple Git-154)
+

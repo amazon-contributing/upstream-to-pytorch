@@ -1,0 +1,554 @@
+From b8f6510df72dd7036441918a1da013d3ae2c3f26 Mon Sep 17 00:00:00 2001
+From: Vijay Anand <svskvar@amazon.com>
+Date: Mon, 20 Apr 2026 18:53:02 -0700
+Subject: [PATCH 23/24] [DTensor] Make distributed tensor tests
+ accelerator-agnostic (#36)
+
+---
+ .../tensor/debug/test_debug_mode.py           | 41 ++++++++++++-------
+ test/distributed/tensor/test_attention.py     |  4 +-
+ test/distributed/tensor/test_dtensor.py       |  2 +-
+ .../tensor/test_dtensor_compile.py            | 14 ++++---
+ .../tensor/test_dtensor_dispatch_overhead.py  | 16 ++++----
+ .../distributed/tensor/test_dtensor_export.py | 11 +++--
+ .../tensor/test_dtensor_logging.py            | 31 +++++++-------
+ test/distributed/tensor/test_math_ops.py      | 12 +++---
+ test/distributed/tensor/test_matrix_ops.py    | 15 +++----
+ test/distributed/tensor/test_random_ops.py    |  5 ++-
+ torch/_inductor/utils.py                      | 13 ++++--
+ .../distributed/_tensor/common_dtensor.py     | 23 +++++++++++
+ .../optests/autograd_registration.py          | 17 ++++++--
+ 13 files changed, 128 insertions(+), 76 deletions(-)
+
+diff --git a/test/distributed/tensor/debug/test_debug_mode.py b/test/distributed/tensor/debug/test_debug_mode.py
+index 337fd2bd76c..eb20889f2a0 100644
+--- a/test/distributed/tensor/debug/test_debug_mode.py
++++ b/test/distributed/tensor/debug/test_debug_mode.py
+@@ -21,16 +21,20 @@ from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+ from torch.fx.experimental.proxy_tensor import make_fx
+ from torch.testing._internal.common_distributed import (
+     MultiProcessTestCase,
+-    requires_nccl,
++    requires_accelerator_dist_backend,
+     skip_if_lt_x_gpu,
+ )
+ from torch.testing._internal.common_utils import (
+     instantiate_parametrized_tests,
+     parametrize,
+-    requires_cuda,
++    requires_accelerator,
+     run_tests,
+     TestCase,
+ )
++from torch.testing._internal.distributed._tensor.common_dtensor import (
++    DEVICE_TYPE,
++    PG_BACKEND,
++)
+ from torch.testing._internal.distributed.fake_pg import FakeStore
+ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+ from torch.utils._debug_mode import (
+@@ -45,7 +49,14 @@ from torch.utils._python_dispatch import TorchDispatchMode
+ from torch.utils._triton import has_triton_package
+ 
+ 
+-@requires_cuda
++@requires_accelerator
++
++def _get_accelerator_memory():
++    try:
++        return torch.accelerator.get_memory_info(0)[1]
++    except (NotImplementedError):
++        return 0  # Return 0, as that would help skip the test is not skipped
++
+ class TestDTensorDebugMode(TestCase):
+     def tearDown(self):
+         super().tearDown()
+@@ -58,7 +69,7 @@ class TestDTensorDebugMode(TestCase):
+         dist.init_process_group(
+             backend="fake", rank=0, world_size=self.world_size, store=store
+         )
+-        self.device_type = "cuda"
++        self.device_type = DEVICE_TYPE
+ 
+     def test_debug_mode_mm(self):
+         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+@@ -907,8 +918,8 @@ class TestDTensorDebugMode(TestCase):
+         )
+ 
+     @unittest.skipIf(
+-        not torch.cuda.is_available()
+-        or torch.cuda.get_device_properties(0).total_memory < 2**26,
++        not torch.accelerator.is_available()
++        or _get_accelerator_memory() < 2**26,
+         "Being conservative, test peak memory is 25MB?",
+     )
+     def test_tensor_hash_redistribute(self):
+@@ -1125,7 +1136,7 @@ class TestDTensorDebugMode(TestCase):
+ 
+ 
+ class TestDebugModeUtils(TestCase):
+-    """Test DebugMode with NCCL backend without using DTensor."""
++    """Test DebugMode utility functions."""
+ 
+     def test_hash_empty_tensor(self):
+         t = torch.tensor([])
+@@ -1136,7 +1147,7 @@ class TestDebugModeUtils(TestCase):
+         self.assertTrue(isinstance(out, int))
+ 
+ 
+-class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
++class TestDTensorDebugModeDistBackend(MultiProcessTestCase):
+     @property
+     def world_size(self):
+         return 2  # Need at least 2 ranks for collectives
+@@ -1146,16 +1157,16 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
+         self._spawn_processes()
+ 
+     def _init_process_group(self):
+-        """Initialize NCCL process group for each spawned process."""
+-        torch.cuda.set_device(self.rank)
++        """Initialize accelerator process group for each spawned process."""
++        torch.accelerator.set_device_index(self.rank)
+         store = dist.FileStore(self.file_name, self.world_size)
+         dist.init_process_group(
+-            "nccl",
++            PG_BACKEND,
+             world_size=self.world_size,
+             rank=self.rank,
+             store=store,
+         )
+-        self.device = f"cuda:{self.rank}"
++        self.device = f"{DEVICE_TYPE}:{self.rank}"
+ 
+     def _destroy_process_group(self):
+         """Destroy the process group."""
+@@ -1168,7 +1179,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
+         except OSError:
+             pass
+ 
+-    @requires_nccl()
++    @requires_accelerator_dist_backend()
+     @skip_if_lt_x_gpu(2)
+     def test_allgather_base(self):
+         self._init_process_group()
+@@ -1194,7 +1205,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
+ 
+         self._destroy_process_group()
+ 
+-    @requires_nccl()
++    @requires_accelerator_dist_backend()
+     @skip_if_lt_x_gpu(2)
+     def test_allgather_base_async_op(self):
+         """Test all_gather_into_tensor with async_op=True."""
+@@ -1229,7 +1240,7 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
+ 
+         self._destroy_process_group()
+ 
+-    @requires_nccl()
++    @requires_accelerator_dist_backend()
+     @skip_if_lt_x_gpu(2)
+     def test_allgather_functional_with_async_collective_tensor(self):
+         self._init_process_group()
+diff --git a/test/distributed/tensor/test_attention.py b/test/distributed/tensor/test_attention.py
+index 858651243a5..a6f1678ac45 100644
+--- a/test/distributed/tensor/test_attention.py
++++ b/test/distributed/tensor/test_attention.py
+@@ -101,7 +101,7 @@ class SDPAWrapper(torch.nn.Module):
+ class RingAttentionTest(DTensorTestBase):
+     @property
+     def world_size(self) -> int:
+-        return torch.cuda.device_count()
++        return torch.accelerator.device_count()
+ 
+     @property
+     def destroy_pg_upon_exit(self) -> bool:
+@@ -491,7 +491,7 @@ class CPFlexAttentionTest(DTensorTestBase):
+         document_lengths: list[list[int]] | None = None,
+     ) -> None:
+         torch.use_deterministic_algorithms(True)
+-        torch.cuda.manual_seed(1234)
++        torch.get_device_module(self.device_type).manual_seed(1234)
+ 
+         dtype = torch.float32
+         bs = B if B > 1 else 8
+diff --git a/test/distributed/tensor/test_dtensor.py b/test/distributed/tensor/test_dtensor.py
+index e14f355d971..ae0bd7f14e5 100644
+--- a/test/distributed/tensor/test_dtensor.py
++++ b/test/distributed/tensor/test_dtensor.py
+@@ -1390,7 +1390,7 @@ class DTensorMeshTest(DTensorTestBase):
+                 placements=None,
+             )
+ 
+-        x = make_dtensor(1, 1, dtype=torch.bfloat16, device="cuda")
++        x = make_dtensor(1, 1, dtype=torch.bfloat16, device=self.device_type)
+ 
+         # Fails with AssertionError: P1972527564
+         torch.cond(
+diff --git a/test/distributed/tensor/test_dtensor_compile.py b/test/distributed/tensor/test_dtensor_compile.py
+index c2cee671489..41647d69d17 100644
+--- a/test/distributed/tensor/test_dtensor_compile.py
++++ b/test/distributed/tensor/test_dtensor_compile.py
+@@ -283,15 +283,17 @@ def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_s
+     to_local = inter.to_local();  inter = None
+     return (to_local,)""",  # noqa: B950
+         )
+-        self.assertExpectedInline(
+-            str(backend.fw_graphs[0].code).strip(),
+-            """\
++        expected_code = """\
+ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+-    _to_copy = torch.ops.aten._to_copy.default(arg3_1, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  arg3_1 = None
++    _to_copy = torch.ops.aten._to_copy.default(arg3_1, dtype = torch.float64, layout = torch.strided, device = device(type='DEVICE_TYPE', index=0));  arg3_1 = None
+     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
+     add = torch.ops.aten.add.Tensor(arg0_1, view);  arg0_1 = view = None
+     view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
+-    return (view_1,)""",  # noqa: B950
++    return (view_1,)"""
++        expected_code = expected_code.replace("DEVICE_TYPE", self.device_type)
++        self.assertEqual(
++            str(backend.fw_graphs[0].code).strip(),
++            expected_code,  # noqa: B950
+         )
+ 
+     @skipIfXpu(msg="AssertionError: torch-xpu-ops: 2958")
+@@ -2873,4 +2875,4 @@ class TestDTensorCompileE2E(DTensorTestBase):
+ 
+ 
+ if __name__ == "__main__":
+-    run_tests()
++    run_tests()
+\ No newline at end of file
+diff --git a/test/distributed/tensor/test_dtensor_dispatch_overhead.py b/test/distributed/tensor/test_dtensor_dispatch_overhead.py
+index ab9b578b80f..a2ea67a7bbc 100644
+--- a/test/distributed/tensor/test_dtensor_dispatch_overhead.py
++++ b/test/distributed/tensor/test_dtensor_dispatch_overhead.py
+@@ -13,6 +13,7 @@ from torch.distributed.tensor import distribute_tensor, DTensor, Shard
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+ from torch.testing._internal.common_utils import run_tests
+ from torch.testing._internal.distributed._tensor.common_dtensor import (
++    DEVICE_TYPE,
+     DTensorTestBase,
+     with_comms,
+ )
+@@ -69,19 +70,18 @@ class DistOpDispatchOverHead(DTensorTestBase):
+     @skip_if_lt_x_gpu(4)
+     @with_comms
+     def test_dtensor_add_op_dispatch_overhead(self):
+-        if torch.cuda.is_available():
+-            device_props = torch.cuda.get_device_name(0)
+-            gpu_name = device_props
+-            logger.info("running on %s", gpu_name)
+-            # TODO: adjust `expected_propagate_time` and `expected_dispatch_time` to target different hardware
++        if torch.accelerator.is_available():
++            device_module = torch.get_device_module(DEVICE_TYPE)
++            if hasattr(device_module, "get_device_name"):
++                logger.info("running on %s", device_module.get_device_name(0))
+         else:
+-            self.skipTest("CUDA not available")
++            self.skipTest("Accelerator not available")
+         expected_propagate_time = 880  # noqa: F841
+         expected_dispatch_time = 90  # noqa: F841
+         diff_percent_threshold = 0.20  # noqa: F841
+         propagator = DTensor._op_dispatcher.sharding_propagator
+-        device_mesh = init_device_mesh("cuda", (self.world_size,))
+-        input_data = torch.rand(512, 512, device="cuda")
++        device_mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
++        input_data = torch.rand(512, 512, device=DEVICE_TYPE)
+         a = distribute_tensor(input_data, device_mesh, [Shard(0)])
+         # warm up
+         with TimeCaptureMode() as tcm:
+diff --git a/test/distributed/tensor/test_dtensor_export.py b/test/distributed/tensor/test_dtensor_export.py
+index 8255013db88..018fc122068 100644
+--- a/test/distributed/tensor/test_dtensor_export.py
++++ b/test/distributed/tensor/test_dtensor_export.py
+@@ -26,11 +26,14 @@ from torch.nn.attention.flex_attention import (
+ from torch.testing._internal.common_utils import (
+     instantiate_parametrized_tests,
+     parametrize,
+-    requires_cuda,
++    requires_accelerator,
+     run_tests,
+     TestCase,
+ )
+-from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
++from torch.testing._internal.distributed._tensor.common_dtensor import (
++    DEVICE_TYPE,
++    MLPModule,
++)
+ from torch.testing._internal.distributed.fake_pg import FakeStore
+ from torch.utils._pytree import register_pytree_node
+ 
+@@ -175,7 +178,7 @@ register_pytree_node(
+ )
+ 
+ 
+-@requires_cuda
++@requires_accelerator
+ class DTensorExportTest(TestCase):
+     def tearDown(self):
+         super().tearDown()
+@@ -188,7 +191,7 @@ class DTensorExportTest(TestCase):
+         dist.init_process_group(
+             backend="fake", rank=0, world_size=self.world_size, store=store
+         )
+-        self.device_type = "cuda"
++        self.device_type = DEVICE_TYPE
+ 
+     def _run_test(self, export_fn, test_annotation=False):
+         dp_degree = 2
+diff --git a/test/distributed/tensor/test_dtensor_logging.py b/test/distributed/tensor/test_dtensor_logging.py
+index 72a886c0e14..7203451ff4e 100644
+--- a/test/distributed/tensor/test_dtensor_logging.py
++++ b/test/distributed/tensor/test_dtensor_logging.py
+@@ -8,11 +8,12 @@ from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
+ from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+ from torch.distributed.tensor._op_schema import OpSchema
+ from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
++from torch.testing._internal.common_utils import requires_accelerator, run_tests, TestCase
++from torch.testing._internal.distributed._tensor.common_dtensor import DEVICE_TYPE
+ from torch.testing._internal.distributed.fake_pg import FakeStore
+ 
+ 
+-@requires_cuda
++@requires_accelerator
+ class TestDTensorLogging(TestCase):
+     """Test DTensor logging."""
+ 
+@@ -28,7 +29,7 @@ class TestDTensorLogging(TestCase):
+         dist.init_process_group(
+             backend="fake", rank=0, world_size=self.world_size, store=store
+         )
+-        self.device_type = "cuda"
++        self.device_type = DEVICE_TYPE
+ 
+     def test_sharding_prop_cache_logging(self):
+         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+@@ -58,14 +59,12 @@ class TestDTensorLogging(TestCase):
+         x_dt2 = DTensor.from_local(torch.randn(4, 4), mesh, [Shard(0)], run_check=False)
+         x_dt2 + x_dt2
+ 
+-        self.assertExpectedInline(
+-            log_string(),
+-            """\
+-sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[4, 4](S(0)))
+-sharding_prop HIT (C++ fast path): aten::add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0))), 4822678189205111) -> Spec(f32[4, 4](S(0)))
+-sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](R)), Spec(f32[4, 4](R))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[4, 4](R))
+-sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(f32[8, 4](S(0)))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[8, 4](S(0)))""",  # noqa: B950
+-        )
++        logs = log_string()
++        mesh_str = f"DeviceMesh((2,), '{self.device_type}', stride=(1,))"
++        self.assertIn(f"sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on {mesh_str}) -> Spec(f32[4, 4](S(0)))", logs)  # noqa: B950
++        self.assertIn("sharding_prop HIT (C++ fast path): aten::add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))", logs)  # noqa: B950
++        self.assertIn(f"sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](R)), Spec(f32[4, 4](R))) on {mesh_str}) -> Spec(f32[4, 4](R))", logs)  # noqa: B950
++        self.assertIn(f"sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(f32[8, 4](S(0)))) on {mesh_str}) -> Spec(f32[8, 4](S(0)))", logs)  # noqa: B950
+ 
+         # Test Python LRU cache, directly with ShardingPropagator
+         log_records.clear()
+@@ -86,12 +85,10 @@ sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(
+         )
+         propagator.propagate_op_sharding(op_schema)  # Python cache miss
+         propagator.propagate_op_sharding(op_schema)  # Python cache hit
+-        self.assertExpectedInline(
+-            log_string(),
+-            """\
+-sharding_prop python cache MISS: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[4, 4](S(0)))
+-sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), 'cuda', stride=(1,))) -> Spec(f32[4, 4](S(0)))""",  # noqa: B950
+-        )
++        logs = log_string()
++        mesh_str = f"DeviceMesh((2,), '{self.device_type}', stride=(1,))"
++        self.assertIn(f"sharding_prop python cache MISS: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on {mesh_str}) -> Spec(f32[4, 4](S(0)))", logs)  # noqa: B950
++        self.assertIn(f"sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on {mesh_str}) -> Spec(f32[4, 4](S(0)))", logs)  # noqa: B950
+ 
+     def test_logging_level_change_resets_cpp_cache(self):
+         """setLevel on the dispatch logger resets the C++ cached logging flag."""
+diff --git a/test/distributed/tensor/test_math_ops.py b/test/distributed/tensor/test_math_ops.py
+index 79093bd0f64..e8ddca77b7e 100644
+--- a/test/distributed/tensor/test_math_ops.py
++++ b/test/distributed/tensor/test_math_ops.py
+@@ -314,9 +314,9 @@ class DistMathOpsTest(DTensorTestBase):
+         shard_dims = [-1, 0, 1, 2]
+         elementwise_affine_list = [False, True]
+ 
+-        # Test RMSNorm as well if CUDA
++        # Test RMSNorm as well if accelerator
+         norm_types = [torch.nn.LayerNorm]
+-        if self.device_type == "cuda" and hasattr(torch.nn, "RMSNorm"):
++        if self.device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
+             norm_types.append(torch.nn.RMSNorm)
+ 
+         test_config_list = list(
+@@ -382,9 +382,9 @@ class DistMathOpsTest(DTensorTestBase):
+         shard_dims = [0, 1, 2]
+         elementwise_affine_list = [False, True]
+ 
+-        # Test both LayerNorm and RMSNorm (if CUDA)
++        # Test both LayerNorm and RMSNorm (if accelerator)
+         norm_types = [torch.nn.LayerNorm]
+-        if self.device_type == "cuda" and hasattr(torch.nn, "RMSNorm"):
++        if self.device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
+             norm_types.append(torch.nn.RMSNorm)
+ 
+         test_config_list = list(
+@@ -498,9 +498,9 @@ class DistMathOpsTest(DTensorTestBase):
+         device_mesh = self.build_device_mesh()
+         batch, seq_len, embedding_dim, vocab_size = 8, 8, 10, 32
+ 
+-        # Test both LayerNorm and RMSNorm (if CUDA)
++        # Test both LayerNorm and RMSNorm (if accelerator)
+         norm_types = [torch.nn.LayerNorm]
+-        if self.device_type == "cuda" and hasattr(torch.nn, "RMSNorm"):
++        if self.device_type != "cpu" and hasattr(torch.nn, "RMSNorm"):
+             norm_types.append(torch.nn.RMSNorm)
+ 
+         # build our subtest configurations and filter out invalid ones
+diff --git a/test/distributed/tensor/test_matrix_ops.py b/test/distributed/tensor/test_matrix_ops.py
+index 26d2fc74446..a289a04c0ea 100644
+--- a/test/distributed/tensor/test_matrix_ops.py
++++ b/test/distributed/tensor/test_matrix_ops.py
+@@ -909,13 +909,14 @@ class DistMatrixOpsTest(DTensorTestBase):
+         #       Gaps include missing op support for aten.masked_fill_.Scalar.
+         is_causal = True
+         enable_gqa = False
+-        params = torch.backends.cuda.SDPAParams(
+-            query, key, value, None, dropout_p, is_causal, enable_gqa
+-        )
+-        if torch.backends.cuda.can_use_flash_attention(params, debug=False):
+-            available_backends.append(SDPBackend.FLASH_ATTENTION)
+-        if torch.backends.cuda.can_use_efficient_attention(params, debug=False):
+-            available_backends.append(SDPBackend.EFFICIENT_ATTENTION)
++        if self.device_type == "cuda":
++            params = torch.backends.cuda.SDPAParams(
++                query, key, value, None, dropout_p, is_causal, enable_gqa
++            )
++            if torch.backends.cuda.can_use_flash_attention(params, debug=False):
++                available_backends.append(SDPBackend.FLASH_ATTENTION)
++            if torch.backends.cuda.can_use_efficient_attention(params, debug=False):
++                available_backends.append(SDPBackend.EFFICIENT_ATTENTION)
+ 
+         placement_specs = [(Replicate(),), (Shard(0),), (Shard(1),)]
+         for backend, input_placements in itertools.product(
+diff --git a/test/distributed/tensor/test_random_ops.py b/test/distributed/tensor/test_random_ops.py
+index 0e3e7c7d53a..d7aabf608f0 100644
+--- a/test/distributed/tensor/test_random_ops.py
++++ b/test/distributed/tensor/test_random_ops.py
+@@ -702,14 +702,15 @@ class DistTensorRandomOpTest(DTensorTestBase):
+ class DistTensorRandomOpCompileTest(DTensorTestBase):
+     def _run_with_seed(self, fn, create_input, num_runs):
+         """Run fn num_runs times after resetting RNG, returning results and states."""
++        device_module = torch.get_device_module(self.device_type)
+         torch.manual_seed(0)
+         results = []
+-        rng_states = [torch.cuda.get_rng_state()]
++        rng_states = [device_module.get_rng_state()]
+         for _ in range(num_runs):
+             x = create_input()
+             result = fn(x)
+             results.append(result.to_local().clone())
+-            rng_states.append(torch.cuda.get_rng_state())
++            rng_states.append(device_module.get_rng_state())
+         # verify RNG state advances after each call
+         for i in range(len(rng_states) - 1):
+             self.assertFalse(
+diff --git a/torch/_inductor/utils.py b/torch/_inductor/utils.py
+index 2c3e1459943..960a02eda5e 100644
+--- a/torch/_inductor/utils.py
++++ b/torch/_inductor/utils.py
+@@ -105,10 +105,15 @@ T = TypeVar("T")
+ # when get_gpu_type is imported from dynamo
+ @functools.cache
+ def get_gpu_type() -> str:
+-    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
+-    assert len(avail_gpus) <= 1
+-    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+-    return gpu_type
++    device_types = list(GPU_TYPES)
++    privateuse1_name = torch._C._get_privateuse1_backend_name()
++    if privateuse1_name and privateuse1_name != "privateuseone":
++        if hasattr(torch, privateuse1_name):
++            device_types.append(privateuse1_name)
++    avail_devices = [x for x in device_types if getattr(torch, x).is_available()]
++    assert len(avail_devices) <= 1
++    device_type = "cuda" if len(avail_devices) == 0 else avail_devices.pop()
++    return device_type
+ 
+ 
+ from torch._dynamo.device_interface import get_interface_for_device
+diff --git a/torch/testing/_internal/distributed/_tensor/common_dtensor.py b/torch/testing/_internal/distributed/_tensor/common_dtensor.py
+index 0371658aeb3..a85b09d976f 100644
+--- a/torch/testing/_internal/distributed/_tensor/common_dtensor.py
++++ b/torch/testing/_internal/distributed/_tensor/common_dtensor.py
+@@ -5,6 +5,7 @@
+ import contextlib
+ import copy
+ import functools
++import os
+ import itertools
+ import sys
+ import threading
+@@ -1518,3 +1519,25 @@ def op_strategy_context(op_overload, strategy_func, schema_info=None):
+         else:
+             propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
+         _clear_sharding_prop_cache()
++
++
++if os.environ.get("PYTORCH_TESTING_PREFER_MULTIPROCESS"):
++    _PREFER_MULTIPROCESS_MAX_WORLD_SIZE = int(
++        os.environ.get("PYTORCH_TESTING_PREFER_MULTIPROCESS_MAX_WORLD_SIZE", "4")
++    )
++
++    class DTensorOpTestBase(DTensorTestBase):  # type: ignore[no-redef]
++        @property
++        def world_size(self):
++            return min(_PREFER_MULTIPROCESS_MAX_WORLD_SIZE, NUM_DEVICES)
++
++        def __init_subclass__(cls, **kwargs):
++            super().__init_subclass__(**kwargs)
++            if "world_size" in cls.__dict__:
++                orig = cls.__dict__["world_size"]
++                if isinstance(orig, property):
++                    cls.world_size = property(
++                        lambda self, f=orig.fget: min(
++                            _PREFER_MULTIPROCESS_MAX_WORLD_SIZE, f(self)
++                        )
++                    )
+diff --git a/torch/testing/_internal/optests/autograd_registration.py b/torch/testing/_internal/optests/autograd_registration.py
+index 0c94f127b4e..fedd0fcc15b 100644
+--- a/torch/testing/_internal/optests/autograd_registration.py
++++ b/torch/testing/_internal/optests/autograd_registration.py
+@@ -82,12 +82,19 @@ def autograd_registration_check(op, args, kwargs):
+             "that do require grad."
+         )
+ 
+-    # Determine which AutogradBACKEND key to check
++    # Determine which AutogradBACKEND key to check.
++    # In addition to the built-in accelerators we also accept the device type
++    # string reported by a PrivateUse1 backend. Any such backend dispatches
++    # through the AutogradPrivateUse1 key, so the mapping is uniform across them.
+     all_device_types = {arg.device.type for arg in all_tensors}
+-    if not all_device_types.issubset(["cpu", "cuda", "xpu"]):
+-        # Don't want to support other keys yet
++    _priv = torch._C._get_privateuse1_backend_name()
++    _allowed = {"cpu", "cuda", "xpu"}
++    if _priv != "privateuseone":
++        _allowed.add(_priv)
++    if not all_device_types.issubset(_allowed):
+         raise NotImplementedError(
+-            f"autograd_registration_check: NYI devices other than CPU/CUDA/XPU, got {all_device_types}"
++            "autograd_registration_check: NYI devices other than "
++            f"CPU/CUDA/XPU/PrivateUse1, got {all_device_types}"
+         )
+     if "cuda" in all_device_types:
+         key = "AutogradCUDA"
+@@ -95,6 +102,8 @@ def autograd_registration_check(op, args, kwargs):
+         key = "AutogradCPU"
+     elif "xpu" in all_device_types:
+         key = "AutogradXPU"
++    elif _priv != "privateuseone" and _priv in all_device_types:
++        key = "AutogradPrivateUse1"
+ 
+     if torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), key):
+         return
+-- 
+2.39.5 (Apple Git-154)
+

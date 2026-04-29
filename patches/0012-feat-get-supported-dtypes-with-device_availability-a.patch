@@ -1,0 +1,109 @@
+From e093ae25749ae05e44870050c1905bd8670d1386 Mon Sep 17 00:00:00 2001
+From: aws-abigailfernandes <abigailferns94@gmail.com>
+Date: Mon, 6 Apr 2026 15:36:24 -0700
+Subject: [PATCH 12/24] =?UTF-8?q?feat:=20get=20supported=20dtypes=20with?=
+ =?UTF-8?q?=20device=5Favailability=20api=20for=20OpInfo=20dt=E2=80=A6=20(?=
+ =?UTF-8?q?#19)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ torch/testing/_internal/common_device_type.py |  9 ++++++--
+ torch/testing/_internal/common_dtype.py       | 22 +++++++++++++++++++
+ torch/testing/_internal/opinfo/core.py        |  5 +++--
+ 3 files changed, 32 insertions(+), 4 deletions(-)
+
+diff --git a/torch/testing/_internal/common_device_type.py b/torch/testing/_internal/common_device_type.py
+index 8fc9f2cd968..896e80d9e45 100644
+--- a/torch/testing/_internal/common_device_type.py
++++ b/torch/testing/_internal/common_device_type.py
+@@ -25,7 +25,7 @@ from torch.testing._internal.common_cuda import (
+     TEST_CUSPARSE_GENERIC,
+     TEST_HIPSPARSE_GENERIC,
+ )
+-from torch.testing._internal.common_dtype import get_all_dtypes
++from torch.testing._internal.common_dtype import get_all_dtypes, get_unsupported_dtypes_for_device
+ from torch.testing._internal.common_utils import (
+     _TestParametrizer,
+     clear_tracked_input,
+@@ -389,7 +389,12 @@ class DeviceTypeTestBase(TestCase):
+         if default_dtypes is None:
+             raise AssertionError(msg)
+ 
+-        return test.dtypes.get(cls.device_type, default_dtypes)
++        result = test.dtypes.get(cls.device_type, default_dtypes)
++        if result is not None and cls.device_type == "privateuse1":
++            result = result - get_unsupported_dtypes_for_device("privateuse1")
++            if not result:
++                return None
++        return result
+ 
+     def _get_precision_override(self, test, dtype):
+         if not hasattr(test, "precision_overrides"):
+diff --git a/torch/testing/_internal/common_dtype.py b/torch/testing/_internal/common_dtype.py
+index 6e62009b6b6..d47cb1ac6a8 100644
+--- a/torch/testing/_internal/common_dtype.py
++++ b/torch/testing/_internal/common_dtype.py
+@@ -209,6 +209,28 @@ def get_all_int_dtypes() -> list[torch.dtype]:
+     return [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
+ 
+ 
++def get_unsupported_dtypes_for_device(device_type: str) -> set[torch.dtype]:
++    """Return the set of dtypes a device declares as unsupported.
++
++    Uses ``torch.accelerator.get_device_capability()`` which returns
++    ``{"supported_dtypes": set(torch.dtype)}``. Dtypes not in that set
++    are considered unsupported. Returns an empty set if the capability
++    cannot be queried.
++    """
++    try:
++        if device_type == "privateuse1":
++            device_type = torch._C._get_privateuse1_backend_name()
++        caps = torch.accelerator.get_device_capability(device_type + ":0")
++        supported = caps.get("supported_dtypes", None)
++        if supported is not None:
++            return set(get_all_dtypes(include_complex=True, include_complex32=True)) - supported
++    except Exception:
++        # If querying capabilities fails for any reason, treat the device as
++        # having no declared unsupported dtypes and fall back to an empty set.
++        pass
++    return set()
++
++
+ def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> list[torch.dtype]:
+     dtypes = [torch.float32, torch.float64]
+     if include_half:
+diff --git a/torch/testing/_internal/opinfo/core.py b/torch/testing/_internal/opinfo/core.py
+index acd9cad9164..06485ad3aff 100644
+--- a/torch/testing/_internal/opinfo/core.py
++++ b/torch/testing/_internal/opinfo/core.py
+@@ -28,6 +28,7 @@ from torch.testing._internal.common_dtype import (
+     floating_and_complex_types_and,
+     floating_types,
+     get_all_dtypes,
++    get_unsupported_dtypes_for_device,
+ )
+ from torch.testing._internal.common_utils import (
+     extract_test_fn,
+@@ -1586,7 +1587,7 @@ def test_foo(self, device, dtype, op):
+         if device_type == "cuda" and TEST_WITH_ROCM:
+             device_type = "rocm"
+         result = self.dtypesIf.get(device_type, self.dtypes)
+-        return result
++        return result - get_unsupported_dtypes_for_device(device_type)
+ 
+     def supported_backward_dtypes(self, device_type):
+         if not self.supports_autograd:
+@@ -1612,7 +1613,7 @@ def test_foo(self, device, dtype, op):
+         allowed_backward_dtypes = floating_and_complex_types_and(
+             torch.bfloat16, torch.float16, torch.complex32
+         )
+-        return set(allowed_backward_dtypes).intersection(backward_dtypes)
++        return set(allowed_backward_dtypes).intersection(backward_dtypes) - get_unsupported_dtypes_for_device(device_type)
+ 
+     def supports_dtype(self, dtype, device_type) -> bool:
+         return dtype in self.supported_dtypes(device_type)
+-- 
+2.39.5 (Apple Git-154)
+

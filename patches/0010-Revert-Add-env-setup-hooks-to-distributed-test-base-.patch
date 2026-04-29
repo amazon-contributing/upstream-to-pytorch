@@ -1,0 +1,83 @@
+From 1baa9405cabadf80ba2480faeae0aed879fc6f69 Mon Sep 17 00:00:00 2001
+From: Vijay Anand <svskvar@amazon.com>
+Date: Fri, 3 Apr 2026 17:34:56 -0700
+Subject: [PATCH 10/24] Revert "Add env setup hooks to distributed test base
+ classes" (#22)
+
+---
+ torch/testing/_internal/common_distributed.py | 24 -------------------
+ 1 file changed, 24 deletions(-)
+
+diff --git a/torch/testing/_internal/common_distributed.py b/torch/testing/_internal/common_distributed.py
+index 43b4526f85e..57a2bd7176e 100644
+--- a/torch/testing/_internal/common_distributed.py
++++ b/torch/testing/_internal/common_distributed.py
+@@ -66,19 +66,6 @@ ACCELERATOR_DIST_BACKENDS = ["nccl", "xccl", "hccl"]
+ DDP_RANK_DEVICES = ["cuda", "xpu"]
+ HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1
+ 
+-# Hooks called in the parent process before workers are spawned.
+-_test_env_setup_hooks: list[Callable[..., None]] = []
+-# Hooks called in each child worker process with (rank,) before the test runs.
+-_worker_env_setup_hooks: list[Callable[[int], None]] = []
+-
+-
+-def register_test_env_setup_hook(fn: Callable[..., None]) -> None:
+-    """Register a hook called in the parent process before workers spawn."""
+-    _test_env_setup_hooks.append(fn)
+-
+-def register_worker_env_setup_hook(fn: Callable[[int], None]) -> None:
+-    """Register a hook called with (rank) in each spawned worker process."""
+-    _worker_env_setup_hooks.append(fn)
+ 
+ class TestSkip(NamedTuple):
+     exit_code: int
+@@ -898,8 +885,6 @@ class MultiProcessTestCase(TestCase):
+ 
+     def setUp(self) -> None:
+         super().setUp()
+-        for hook in _test_env_setup_hooks:
+-            hook(world_size=self.world_size)
+ 
+         # Used for tests that are expected to return a non-0 exit code, such as
+         # SIGABRT thrown by watchdog.
+@@ -999,8 +984,6 @@ class MultiProcessTestCase(TestCase):
+     def _run(
+         cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs
+     ) -> None:
+-        for hook in _worker_env_setup_hooks:
+-            hook(rank)
+         self = cls(test_name)
+         self.rank = rank
+         self.file_name = file_name
+@@ -1761,8 +1744,6 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
+         cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs
+     ) -> None:
+         trace_log.addHandler(logging.NullHandler())
+-        for hook in _worker_env_setup_hooks:
+-            hook(rank)
+ 
+         # The rest is copypasta from MultiProcessTestCase._run
+         self = cls(test_name)
+@@ -1876,9 +1857,6 @@ class MultiProcContinuousTest(TestCase):
+             else:
+                 raise
+ 
+-        for hook in _worker_env_setup_hooks:
+-            hook(rank)
+-
+         # End of bootstrap
+         logger.debug("Setup complete")
+ 
+@@ -2082,8 +2060,6 @@ class MultiProcContinuousTest(TestCase):
+         Test fixture. Run before each test.
+         """
+         super().setUp()
+-        for hook in _test_env_setup_hooks:
+-            hook(world_size=self.world_size)
+ 
+         # Ensure processes are spawned (lazy initialization for instantiate_device_type_tests)
+         self.__class__._ensure_processes_spawned()
+-- 
+2.39.5 (Apple Git-154)
+

@@ -1,0 +1,2998 @@
+From 60ea25abefc833b7319b0e667a991a3fed3128b2 Mon Sep 17 00:00:00 2001
+From: aws-abigailfernandes <abigailferns94@gmail.com>
+Date: Thu, 16 Apr 2026 12:41:47 -0700
+Subject: [PATCH 19/24] feat: Make dynamo tests device-agnostic for PrivateUse1
+ backends (#31)
+
+* feat: Make dynamo tests device-agnostic for PrivateUse1 backends
+
+Replace CUDA-specific code in 24 dynamo test files with device-agnostic
+equivalents, enabling PrivateUse1 backends to run these tests without
+monkey-patching.
+
+- Replace device=cuda with device_type, .cuda() with .to(device_type)
+- Replace torch.cuda.Stream/Event with torch.get_device_module(device_type)
+- Replace torch.cuda.synchronize/current_stream with torch.accelerator APIs
+- Replace @requires_cuda with @requires_accelerator where appropriate
+- Add @requires_cuda to tests that use CUDA-specific APIs in test body
+- Add device_type module-level constant using torch.accelerator
+- Add COMPILE_BACKEND/get_compile_backend() to common_utils.py
+- Add requires_accelerator_and_triton to triton_utils.py
+---
+ test/dynamo/test_activation_checkpointing.py  |   4 +-
+ test/dynamo/test_aot_autograd_cache.py        |  16 +-
+ test/dynamo/test_backends.py                  |   4 +-
+ test/dynamo/test_compiler_bisector.py         |  17 +-
+ test/dynamo/test_ctx_manager.py               | 161 ++++++-------
+ test/dynamo/test_deviceguard.py               |   3 +
+ test/dynamo/test_dynamo_decompositions.py     |  45 ++--
+ test/dynamo/test_functions.py                 |   7 +-
+ test/dynamo/test_fx_annotate.py               |   5 +-
+ test/dynamo/test_guard_manager.py             |   8 +-
+ test/dynamo/test_higher_order_ops.py          |  10 +-
+ test/dynamo/test_logging.py                   |   6 +-
+ test/dynamo/test_minifier.py                  |   3 +
+ test/dynamo/test_misc.py                      |  38 +--
+ test/dynamo/test_package.py                   |   6 +-
+ test/dynamo/test_recompile_ux.py              |   5 +-
+ test/dynamo/test_regional_inductor.py         |  20 +-
+ test/dynamo/test_repros.py                    |  56 +++--
+ test/dynamo/test_streams.py                   | 216 +++++++++---------
+ test/dynamo/test_structured_trace.py          |  21 +-
+ test/dynamo/test_subclasses.py                |   4 +-
+ test/dynamo/test_trace_rules.py               |   2 +
+ test/dynamo/test_unspec.py                    |   6 +-
+ .../test_wrap_inductor_compiled_regions.py    | 140 ++++++------
+ torch/testing/_internal/triton_utils.py       |   7 +
+ 25 files changed, 443 insertions(+), 367 deletions(-)
+
+diff --git a/test/dynamo/test_activation_checkpointing.py b/test/dynamo/test_activation_checkpointing.py
+index cec87eb7350..cf16f290784 100644
+--- a/test/dynamo/test_activation_checkpointing.py
++++ b/test/dynamo/test_activation_checkpointing.py
+@@ -16,7 +16,9 @@ import torch._functorch.config
+ import torch.distributed as dist
+ import torch.nn as nn
+ import torch.utils.checkpoint
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+ from functorch.compile import (
++
+     default_partition,
+     min_cut_rematerialization_partition,
+     nop,
+@@ -2296,7 +2298,7 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
+ 
+         return result, captured_gm
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
++    @unittest.skipIf(not torch.accelerator.is_available(), "CUDA not available")
+     def test_ac_rematerialize_simple_forward_backward(self):
+         x = torch.randn(4, 4, requires_grad=True)
+         y = torch.randn(4, 4, requires_grad=True)
+diff --git a/test/dynamo/test_aot_autograd_cache.py b/test/dynamo/test_aot_autograd_cache.py
+index 4e5990d6a44..091b1b84f24 100644
+--- a/test/dynamo/test_aot_autograd_cache.py
++++ b/test/dynamo/test_aot_autograd_cache.py
+@@ -23,7 +23,9 @@ import torch._functorch.aot_autograd as aot_autograd
+ from torch._dynamo import config as dynamo_config
+ from torch._dynamo.utils import counters
+ from torch._functorch import config as functorch_config
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+ from torch._functorch._aot_autograd.autograd_cache import (
++
+     AOTAutogradCache,
+     AOTAutogradCachePickler,
+     autograd_cache_key,
+@@ -574,7 +576,7 @@ class AOTAutogradCacheTests(InductorTestCase):
+     @inductor_config.patch("fx_graph_cache", True)
+     @functorch_config.patch({"enable_autograd_cache": True})
+     @functorch_config.patch({"strict_autograd_cache": True})
+-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
++    @unittest.skipIf(not torch.accelerator.is_available(), "CUDA is unavailable")
+     @requires_triton()
+     def test_non_bundled_to_bundled_config_change(self):
+         if functorch_config.bundled_autograd_cache:
+@@ -791,7 +793,7 @@ class AOTAutogradCacheTests(InductorTestCase):
+         def fn(a):
+             return MyAutogradFunction.apply(a)
+ 
+-        a = torch.randn(5, device="cuda", requires_grad=True)
++        a = torch.randn(5, device=device_type, requires_grad=True)
+         a2 = a.clone().detach_().requires_grad_(True)
+         compiled_fn = torch.compile(fn, backend="inductor")
+         result = compiled_fn(a)
+@@ -847,7 +849,7 @@ class AOTAutogradCacheTests(InductorTestCase):
+         def fn(a):
+             return MyAutogradFunction.apply(a)
+ 
+-        a = torch.randn(5, device="cuda", requires_grad=True)
++        a = torch.randn(5, device=device_type, requires_grad=True)
+         a2 = a.clone().detach_().requires_grad_(True)
+         compiled_fn = torch.compile(fn, backend="inductor")
+         result = compiled_fn(a)
+@@ -1841,8 +1843,8 @@ class AOTAutogradCacheTests(InductorTestCase):
+         def f(x, y):
+             return x.sin() + y
+ 
+-        x = torch.randn(10, device="cuda")
+-        y = torch.randn(10, device="cuda")
++        x = torch.randn(10, device=device_type)
++        y = torch.randn(10, device=device_type)
+         with torch.no_grad():
+             result = f(x, y)
+             self.assertEqual(result, x.sin() + y)
+@@ -1887,7 +1889,7 @@ class AOTAutogradCacheTests(InductorTestCase):
+         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
++    @unittest.skipIf(not torch.accelerator.is_available(), "CUDA is unavailable")
+     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
+     @inductor_config.patch("fx_graph_remote_cache", False)
+     @inductor_config.patch("fx_graph_cache", True)
+@@ -1989,7 +1991,7 @@ class AOTAutogradCacheTests(InductorTestCase):
+         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 3)
+         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 3)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
++    @unittest.skipIf(not torch.accelerator.is_available(), "CUDA is unavailable")
+     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
+     @inductor_config.patch("fx_graph_remote_cache", False)
+     @inductor_config.patch("fx_graph_cache", True)
+diff --git a/test/dynamo/test_backends.py b/test/dynamo/test_backends.py
+index 16b5cd7f108..d0cf0f1a4f9 100644
+--- a/test/dynamo/test_backends.py
++++ b/test/dynamo/test_backends.py
+@@ -16,7 +16,7 @@ from torch.testing._internal.common_device_type import (
+     onlyHPU,
+ )
+ from torch.testing._internal.common_utils import skipIfHpu
+-from torch.testing._internal.triton_utils import requires_cuda_and_triton
++from torch.testing._internal.triton_utils import requires_accelerator_and_triton
+ 
+ 
+ class Seq(torch.nn.Module):
+@@ -153,7 +153,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
+     def test_aot_ts(self, device):
+         self._check_backend_works("aot_ts", device)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_aot_cudagraphs(self, device):
+         self._check_backend_works("cudagraphs", device)
+ 
+diff --git a/test/dynamo/test_compiler_bisector.py b/test/dynamo/test_compiler_bisector.py
+index 3d0e6637961..fdab54bc70f 100644
+--- a/test/dynamo/test_compiler_bisector.py
++++ b/test/dynamo/test_compiler_bisector.py
+@@ -13,6 +13,9 @@ from torch.library import _scoped_library, Library
+ from torch.testing._internal.triton_utils import requires_cuda_and_triton
+ 
+ 
++
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
++
+ aten = torch.ops.aten
+ 
+ 
+@@ -83,7 +86,7 @@ class TestCompilerBisector(TestCase):
+             torch._dynamo.reset()
+             with patch_exp_decomp():
+                 vq_compiled = torch.compile(vq)
+-                x = torch.randn(4, 400, 256).cuda()
++                x = torch.randn(4, 400, 256).to(device_type)
+                 with torch._dynamo.utils.preserve_rng_state():
+                     vq(x)
+                 out_compiled = vq_compiled(x)
+@@ -149,7 +152,7 @@ class TestCompilerBisector(TestCase):
+         def test_fn():
+             torch._dynamo.reset()
+ 
+-            inp = torch.rand([10], device="cuda")
++            inp = torch.rand([10], device=device_type)
+ 
+             out = foo(inp)
+             out_c = torch.compile(foo)(inp)
+@@ -165,7 +168,7 @@ class TestCompilerBisector(TestCase):
+ 
+     def test_rng(self):
+         def foo():
+-            return torch.rand([10], device="cuda") + 1
++            return torch.rand([10], device=device_type) + 1
+ 
+         def test_fn():
+             torch._dynamo.reset()
+@@ -239,7 +242,7 @@ class TestCompilerBisector(TestCase):
+ 
+             dtype = torch.bfloat16
+             torch.manual_seed(0)
+-            inp = torch.randn(16, 16, 768, dtype=dtype, device="cuda")
++            inp = torch.randn(16, 16, 768, dtype=dtype, device=device_type)
+             eager_scale = calculate_scale(inp)
+             compile_scale = torch.compile(calculate_scale)(inp)
+ 
+@@ -257,7 +260,7 @@ class TestCompilerBisector(TestCase):
+                 def my_func(x):
+                     return ((x * -1) - 0.01).relu()
+ 
+-                inp = torch.rand([100], device="cuda")
++                inp = torch.rand([100], device=device_type)
+ 
+                 return torch.allclose(torch.compile(my_func)(inp), my_func(inp))
+ 
+@@ -319,7 +322,7 @@ class TestCompilerBisector(TestCase):
+         def test_fn():
+             torch._dynamo.reset()
+ 
+-            x = torch.randn(1024, device="cuda")
++            x = torch.randn(1024, device=device_type)
+             with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
+                 opt_f = torch.compile(f, backend=MyBackend())
+                 return torch.allclose(opt_f(x), f(x))
+@@ -358,7 +361,7 @@ class TestCompilerBisector(TestCase):
+             try:
+                 foo_c = torch.compile(foo, mode="reduce-overhead")
+                 bar_c = torch.compile(bar, mode="reduce-overhead")
+-                x = torch.randn(10, device="cuda")
++                x = torch.randn(10, device=device_type)
+                 foo_c(x)
+                 bar_c(x)
+ 
+diff --git a/test/dynamo/test_ctx_manager.py b/test/dynamo/test_ctx_manager.py
+index cae163ac786..3e703cc3127 100644
+--- a/test/dynamo/test_ctx_manager.py
++++ b/test/dynamo/test_ctx_manager.py
+@@ -20,6 +20,7 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTIO
+ from torch.testing._internal.common_utils import (
+     instantiate_parametrized_tests,
+     parametrize,
++    requires_cuda,
+ )
+ 
+ 
+@@ -215,22 +216,22 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertTrue(same(ref, res))
+         self.assertEqual(cnts.frame_count, 2)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     def test_cuda_stream_context_manager1(self):
+         def fn(x):
+-            s = torch.cuda.Stream()
++            s = torch.get_device_module(device_type).Stream()
+             x = torch.mul(x, 5)
+             x = torch.add(x, 2)
+-            current_stream = torch.cuda.current_stream()
++            current_stream = torch.accelerator.current_stream()
+             s.wait_stream(current_stream)
+-            with torch.cuda.stream(s):
++            with torch.get_device_module(device_type).stream(s):
+                 x = torch.relu(x)
+             current_stream.wait_stream(s)
+             x = torch.add(x, 1)
+             x = torch.cos(x)
+             return x
+ 
+-        x = torch.randn((2, 2), device="cuda")
++        x = torch.randn((2, 2), device=device_type)
+         ref = fn(x)
+         cnts = torch._dynamo.testing.CompileCounter()
+         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+@@ -240,17 +241,17 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertExpectedInline(str(cnts.op_count), """9""")
+ 
+     @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     def test_cuda_stream_across_graph_break(self):
+         def fn(x):
+-            s = torch.cuda.Stream()
++            s = torch.get_device_module(device_type).Stream()
+             x = torch.mul(x, 5)
+             x = torch.add(x, 2)
+ 
+             print("foo")
+ 
+-            tcs = torch.cuda.stream(s)
+-            current_stream = torch.cuda.current_stream()
++            tcs = torch.get_device_module(device_type).stream(s)
++            current_stream = torch.accelerator.current_stream()
+             s.wait_stream(current_stream)
+ 
+             with tcs:
+@@ -261,7 +262,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+             x = torch.cos(x)
+             return x
+ 
+-        x = torch.randn((2, 2), device="cuda")
++        x = torch.randn((2, 2), device=device_type)
+         ref = fn(x)
+         cnts = torch._dynamo.testing.CompileCounter()
+         opt_fn = torch.compile(fn, backend=cnts)
+@@ -271,25 +272,25 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertEqual(cnts.op_count, 9)
+ 
+     @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     def test_cuda_stream_context_manager2(self):
+         def fn(x, s):
+             x = torch.mul(x, 5)
+             x = torch.add(x, 2)
+ 
+-            current_stream = torch.cuda.current_stream()
++            current_stream = torch.accelerator.current_stream()
+             s.wait_stream(current_stream)
+ 
+-            with torch.cuda.stream(s):
++            with torch.get_device_module(device_type).stream(s):
+                 x = torch.relu(x)
+ 
+             current_stream.wait_stream(s)
+-            with torch.cuda.stream(current_stream):
++            with torch.get_device_module(device_type).stream(current_stream):
+                 x = torch.relu(x)
+ 
+-            s2 = torch.cuda.Stream()
++            s2 = torch.get_device_module(device_type).Stream()
+             s2.wait_stream(current_stream)
+-            with torch.cuda.stream(s2):
++            with torch.get_device_module(device_type).stream(s2):
+                 x = torch.relu(x)
+ 
+             current_stream.wait_stream(s2)
+@@ -297,8 +298,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+             x = torch.cos(x)
+             return x
+ 
+-        x = torch.randn((2, 2), device="cuda")
+-        s = torch.cuda.Stream()
++        x = torch.randn((2, 2), device=device_type)
++        s = torch.get_device_module(device_type).Stream()
+         ref = fn(x, s)
+         cnts = torch._dynamo.testing.CompileCounter()
+         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+@@ -307,17 +308,17 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertEqual(cnts.frame_count, 1)
+         self.assertEqual(cnts.op_count, 18)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     def test_cuda_stream_method(self):
+         def fn(x):
+             x = torch.mul(x, 1)
+             x = torch.add(x, 2)
+ 
+-            new_stream = torch.cuda.Stream()
+-            cur_stream = torch.cuda.current_stream()
++            new_stream = torch.get_device_module(device_type).Stream()
++            cur_stream = torch.accelerator.current_stream()
+             new_stream.wait_stream(cur_stream)
+ 
+-            with torch.cuda.stream(new_stream):
++            with torch.get_device_module(device_type).stream(new_stream):
+                 x = torch.sin(x)
+                 x = torch.add(x, 3)
+ 
+@@ -327,7 +328,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+             cur_stream.query()
+             cur_stream.synchronize()
+ 
+-            with torch.cuda.stream(new_stream):
++            with torch.get_device_module(device_type).stream(new_stream):
+                 x = torch.add(x, 5)
+             new_stream.synchronize()
+ 
+@@ -335,7 +336,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+             x = torch.cos(x)
+             return x
+ 
+-        x = torch.randn((2, 2), device="cuda")
++        x = torch.randn((2, 2), device=device_type)
+         ref = fn(x)
+         cnts = torch._dynamo.testing.CompileCounter()
+         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+@@ -344,13 +345,13 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertEqual(cnts.frame_count, 1)
+         self.assertExpectedInline(str(cnts.op_count), """15""")
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     def test_cuda_stream_compared_with_constant(self):
+         def fn(x):
+             x = torch.mul(x, 1)
+             x = torch.add(x, 2)
+ 
+-            cur_stream = torch.cuda.current_stream()
++            cur_stream = torch.accelerator.current_stream()
+             if cur_stream is not None:
+                 return x + 1
+             return x - 1
+@@ -359,12 +360,12 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+             x = torch.mul(x, 1)
+             x = torch.add(x, 2)
+ 
+-            cur_stream = torch.cuda.current_stream()
++            cur_stream = torch.accelerator.current_stream()
+             if cur_stream != "const_str":
+                 return x + 1
+             return x - 1
+ 
+-        x = torch.randn((2, 2), device="cuda")
++        x = torch.randn((2, 2), device=device_type)
+         ref = fn(x)
+         cnts = torch._dynamo.testing.CompileCounter()
+         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+@@ -374,7 +375,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertEqual(ref, res)
+         self.assertEqual(ref, res2)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     def test_cuda_stream_compared_with_stream(self):
+         def fn(x, s0, s1):
+             if s0 == s1:
+@@ -382,8 +383,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+             else:
+                 return x - 1
+ 
+-        s0 = torch.cuda.Stream()
+-        s1 = torch.cuda.Stream()
++        s0 = torch.get_device_module(device_type).Stream()
++        s1 = torch.get_device_module(device_type).Stream()
+         x = torch.randn(2, 2)
+         cnts = torch._dynamo.testing.CompileCounter()
+         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+@@ -414,18 +415,18 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertEqual(cnts.frame_count, 2)
+         self.assertEqual(ref0, res0)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     @unittest.skip(
+         "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+     )
+     def test_cuda_event_reconstruct(self):
+         def fn(x):
+-            e = torch.cuda.Event()
++            e = torch.get_device_module(device_type).Event()
+             x = torch.mul(x, 5)
+             x = torch.add(x, 2)
+             return x, e
+ 
+-        x = torch.randn((2, 2), device="cuda")
++        x = torch.randn((2, 2), device=device_type)
+         ref = fn(x)
+         cnts = torch._dynamo.testing.CompileCounter()
+         opt_fn = torch.compile(fn, backend=cnts)
+@@ -434,25 +435,25 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertEqual(cnts.frame_count, 1)
+         self.assertEqual(cnts.op_count, 3)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     @unittest.skip(
+         "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+     )
+     def test_cuda_event_across_graph_break(self):
+         def fn(x):
+-            e = torch.cuda.Event()
++            e = torch.get_device_module(device_type).Event()
+             e.record()
+             x = torch.mul(x, 5)
+             x = torch.add(x, 2)
+ 
+             print("foo")
+ 
+-            torch.cuda.current_stream().wait_event(e)
++            torch.accelerator.current_stream().wait_event(e)
+             x = torch.add(x, 1)
+             x = torch.cos(x)
+             return x, e
+ 
+-        x = torch.randn((2, 2), device="cuda")
++        x = torch.randn((2, 2), device=device_type)
+         ref = fn(x)
+         cnts = torch._dynamo.testing.CompileCounter()
+         opt_fn = torch.compile(fn, backend=cnts)
+@@ -461,33 +462,33 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertEqual(cnts.frame_count, 2)
+         self.assertEqual(cnts.op_count, 10)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     @unittest.skip(
+         "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+     )
+     def test_cuda_event_created_outside_of_graph(self):
+-        user_stream = torch.cuda.Stream()
+-        event = torch.cuda.Event()
+-        foo = torch.empty((2, 2), device="cuda")
++        user_stream = torch.get_device_module(device_type).Stream()
++        event = torch.get_device_module(device_type).Event()
++        foo = torch.empty((2, 2), device=device_type)
+ 
+         def func(foo):
+             event.wait()
+             return foo + 1, event
+ 
+-        x = torch.randn((1024, 1024), device="cuda")
++        x = torch.randn((1024, 1024), device=device_type)
+         cnts = torch._dynamo.testing.CompileCounter()
+ 
+         def run_iters(fn, compile=False):
+             if compile:
+                 fn = torch.compile(fn, backend=cnts)
+             for _ in range(10):
+-                with torch.cuda.stream(user_stream):
++                with torch.get_device_module(device_type).stream(user_stream):
+                     torch.mm(x, x, out=foo)
+                     event.record()
+                 out = fn(foo)
+                 # let `fn` finish reading `foo` before writing to it in the next
+                 # iteration or `run_iters` call.
+-                torch.cuda.current_stream().synchronize()
++                torch.accelerator.current_stream().synchronize()
+             return out
+ 
+         ref = run_iters(func, compile=False)
+@@ -496,7 +497,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertEqual(cnts.frame_count, 1)
+         self.assertEqual(cnts.op_count, 4)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     @unittest.skip(
+         "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+     )
+@@ -511,10 +512,10 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+             event.query()
+ 
+             new_stream.wait_event(event)
+-            with torch.cuda.stream(new_stream):
++            with torch.get_device_module(device_type).stream(new_stream):
+                 x = torch.add(x, 4)
+ 
+-            new_event = torch.cuda.Event()
++            new_event = torch.get_device_module(device_type).Event()
+             new_event.record(new_stream)
+ 
+             new_event.wait(cur_stream)
+@@ -527,9 +528,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+             x = torch.cos(x)
+             return x
+ 
+-        x = torch.randn((2, 2), device="cuda")
+-        cur_stream = torch.cuda.current_stream()
+-        new_stream = torch.cuda.Stream()
++        x = torch.randn((2, 2), device=device_type)
++        cur_stream = torch.accelerator.current_stream()
++        new_stream = torch.get_device_module(device_type).Stream()
+         ref = fn(x, cur_stream, new_stream)
+         cnts = torch._dynamo.testing.CompileCounter()
+         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+@@ -538,14 +539,14 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertEqual(cnts.frame_count, 1)
+         self.assertExpectedInline(str(cnts.op_count), """16""")
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     def test_cuda_event_method(self):
+         def fn(x):
+             x = torch.mul(x, 1)
+             x = torch.add(x, 2)
+ 
+-            cur_stream = torch.cuda.current_stream()
+-            new_stream = torch.cuda.Stream()
++            cur_stream = torch.accelerator.current_stream()
++            new_stream = torch.get_device_module(device_type).Stream()
+ 
+             x = torch.add(x, 3)
+ 
+@@ -553,7 +554,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+             event.query()
+ 
+             new_stream.wait_event(event)
+-            with torch.cuda.stream(new_stream):
++            with torch.get_device_module(device_type).stream(new_stream):
+                 x = torch.add(x, 4)
+ 
+             new_event = torch.Event()
+@@ -569,7 +570,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+             x = torch.cos(x)
+             return x
+ 
+-        x = torch.randn((2, 2), device="cuda")
++        x = torch.randn((2, 2), device=device_type)
+         ref = fn(x)
+         cnts = torch._dynamo.testing.CompileCounter()
+         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+@@ -578,20 +579,21 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertEqual(cnts.frame_count, 1)
+         self.assertExpectedInline(str(cnts.op_count), """16""")
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     def test_cuda_device(self):
+         def fn(x):
+             with torch.cuda.device(x.device.index - 1):
+                 x = torch.sin(x + 1)
+             return x
+ 
+-        x = torch.randn((2, 2), device="cuda")
++        x = torch.randn((2, 2), device=device_type)
+         ref = fn(x)
+         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+         res = opt_fn(x)
+         self.assertEqual(ref, res)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
++    @requires_cuda
+     def test_cuda__exchange_device_args(self):
+         @torch.compile(backend="eager", fullgraph=True)
+         def fn(args, kwargs):
+@@ -628,16 +630,16 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+             res = opt_fn(x)
+             self.assertTrue(same(ref, res))
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     def test_autocast(self):
+         if not torch.cuda.is_bf16_supported():
+             raise unittest.SkipTest("requires bf16")
+ 
+         class MyModule(torch.nn.Module):
+             def forward(self, x):
+-                a_float32 = torch.rand((8, 8), device="cuda")
+-                b_float32 = torch.rand((8, 8), device="cuda")
+-                d_float32 = torch.rand((8, 8), device="cuda")
++                a_float32 = torch.rand((8, 8), device=device_type)
++                b_float32 = torch.rand((8, 8), device=device_type)
++                d_float32 = torch.rand((8, 8), device=device_type)
+ 
+                 with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                     e_float16 = torch.mm(a_float32, b_float32)
+@@ -658,12 +660,12 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertEqual(exported.device.index, 0)
+         self.assertEqual(exported.dtype, torch.bfloat16)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     def test_cuda_amp_autocast(self):
+         class MyModule(torch.nn.Module):
+             def forward(self, x):
+-                a_float32 = torch.rand((8, 8), device="cuda")
+-                b_float32 = torch.rand((8, 8), device="cuda")
++                a_float32 = torch.rand((8, 8), device=device_type)
++                b_float32 = torch.rand((8, 8), device=device_type)
+ 
+                 with torch.autocast(device_type="cuda", dtype=torch.float64):
+                     c_float64 = torch.mm(a_float32, b_float32)
+@@ -932,13 +934,13 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertEqual(out_32.device.type, "cpu")
+         self.assertEqual(out_32.dtype, torch.float32)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     def test_autocast_float64(self):
+         class MyModule(torch.nn.Module):
+             def forward(self, x):
+-                a_float32 = torch.rand((8, 8), device="cuda")
+-                b_float32 = torch.rand((8, 8), device="cuda")
+-                d_float32 = torch.rand((8, 8), device="cuda")
++                a_float32 = torch.rand((8, 8), device=device_type)
++                b_float32 = torch.rand((8, 8), device=device_type)
++                d_float32 = torch.rand((8, 8), device=device_type)
+ 
+                 with torch.autocast(device_type="cuda", dtype=torch.float64):
+                     e_float64 = torch.mm(a_float32, b_float32)
+@@ -958,13 +960,13 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertEqual(exported.device.index, 0)
+         self.assertEqual(exported.dtype, torch.float64)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     def test_autocast_device(self):
+         class MyModule(torch.nn.Module):
+             def forward(self, x):
+-                a_float32 = torch.rand((8, 8), device="cuda")
+-                b_float32 = torch.rand((8, 8), device="cuda")
+-                d_float32 = torch.rand((8, 8), device="cuda")
++                a_float32 = torch.rand((8, 8), device=device_type)
++                b_float32 = torch.rand((8, 8), device=device_type)
++                d_float32 = torch.rand((8, 8), device=device_type)
+ 
+                 with torch.autocast("cuda"):
+                     e_float64 = torch.mm(a_float32, b_float32)
+@@ -984,7 +986,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertEqual(exported.device.index, 0)
+         self.assertEqual(exported.dtype, torch.float16)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     def test_autocast_arguments_binding(self):
+         def f1(x):
+             with torch.autocast(device_type="cuda", enabled=False):
+@@ -1006,7 +1008,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         self.assertTrue(same(ref1, res1))
+         self.assertTrue(same(ref2, res2))
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     def test_autocast_decorator(self):
+         def autocast_func(orig_func):
+             @torch.amp.autocast(device_type="cuda", dtype=torch.float16)
+@@ -1039,8 +1041,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         def fn(a, b):
+             return mm_float16(a, b), mm_float16_cuda(a, b), mm_float16_cpu(a, b)
+ 
+-        a_float32 = torch.rand((8, 8), device="cuda")
+-        b_float32 = torch.rand((8, 8), device="cuda")
++        a_float32 = torch.rand((8, 8), device=device_type)
++        b_float32 = torch.rand((8, 8), device=device_type)
+ 
+         ref = fn(a_float32, b_float32)
+         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+@@ -1630,10 +1632,11 @@ class GraphModule(torch.nn.Module):
+         res = opt_fn(x, y)
+         self.assertEqual(ref, res)
+ 
++    @requires_cuda
+     def test_graph_break_inlining_autocast(self):
+         for device in ["cuda", "cpu"]:
+             if device == "cuda" and not (
+-                torch.cuda.is_available() and torch.cuda.is_bf16_supported()
++                torch.accelerator.is_available() and getattr(torch.get_device_module(device_type), "is_bf16_supported", lambda: False)()
+             ):
+                 continue
+             self._graph_break_inlining_autocast_test_helper(device)
+diff --git a/test/dynamo/test_deviceguard.py b/test/dynamo/test_deviceguard.py
+index de2c9f1b76b..23c576479a3 100644
+--- a/test/dynamo/test_deviceguard.py
++++ b/test/dynamo/test_deviceguard.py
+@@ -9,6 +9,9 @@ from torch._dynamo.device_interface import CudaInterface, DeviceGuard
+ from torch.testing._internal.common_cuda import TEST_CUDA
+ 
+ 
++
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
++
+ class TestDeviceGuard(torch._dynamo.test_case.TestCase):
+     """
+     Unit tests for the DeviceGuard class using a mock DeviceInterface.
+diff --git a/test/dynamo/test_dynamo_decompositions.py b/test/dynamo/test_dynamo_decompositions.py
+index 16f40c7a3bc..074405bbe42 100644
+--- a/test/dynamo/test_dynamo_decompositions.py
++++ b/test/dynamo/test_dynamo_decompositions.py
+@@ -9,6 +9,9 @@ from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
+ from torch.testing._internal.common_utils import run_tests, skipIfCrossRef
+ 
+ 
++
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
++
+ class TestDynamoDecompositions(torch._dynamo.test_case.TestCase):
+     """Tests for enable_dynamo_decompositions config flag.
+ 
+@@ -629,9 +632,9 @@ class GraphModule(torch.nn.Module):
+         """On CUDA, ATen add_ with tensor alpha extracts the scalar and uses
+         fma(other, alpha, self). Our decomposition must use fma to match."""
+         torch.manual_seed(42)
+-        x = torch.randn(64, 64, device="cuda")
+-        other = torch.randn(64, 64, device="cuda")
+-        alpha = torch.tensor(2.3, device="cuda")
++        x = torch.randn(64, 64, device=device_type)
++        other = torch.randn(64, 64, device=device_type)
++        alpha = torch.tensor(2.3, device=device_type)
+ 
+         def fn(x, other, alpha):
+             return x.add_(other, alpha=alpha)
+@@ -651,8 +654,8 @@ class GraphModule(torch.nn.Module):
+         mismatches on typical inputs (e.g. Adagrad's addcmul_(grad, grad, value=1)).
+         """
+         torch.manual_seed(42)
+-        x = torch.randn(64, 64, device="cuda")
+-        t1 = torch.randn(64, 64, device="cuda")
++        x = torch.randn(64, 64, device=device_type)
++        t1 = torch.randn(64, 64, device=device_type)
+ 
+         def fn(x, t1):
+             # value=1 is a constant, triggers fma path in decomposition
+@@ -668,9 +671,9 @@ class GraphModule(torch.nn.Module):
+     def test_addcmul_scalar_value_cuda(self):
+         """Compiled addcmul_ with scalar value matches eager on CUDA."""
+         torch.manual_seed(42)
+-        x = torch.randn(64, 64, device="cuda")
+-        t1 = torch.randn(64, 64, device="cuda")
+-        t2 = torch.randn(64, 64, device="cuda")
++        x = torch.randn(64, 64, device=device_type)
++        t1 = torch.randn(64, 64, device=device_type)
++        t2 = torch.randn(64, 64, device=device_type)
+ 
+         def fn(x, t1, t2):
+             return x.addcmul_(t1, t2, value=0.5)
+@@ -685,10 +688,10 @@ class GraphModule(torch.nn.Module):
+     def test_addcmul_tensor_value_cuda(self):
+         """Compiled addcmul_ with tensor value matches eager on CUDA."""
+         torch.manual_seed(42)
+-        x = torch.randn(64, 64, device="cuda")
+-        t1 = torch.randn(64, 64, device="cuda")
+-        t2 = torch.randn(64, 64, device="cuda")
+-        value = torch.tensor(0.5, device="cuda")
++        x = torch.randn(64, 64, device=device_type)
++        t1 = torch.randn(64, 64, device=device_type)
++        t2 = torch.randn(64, 64, device=device_type)
++        value = torch.tensor(0.5, device=device_type)
+ 
+         def fn(x, t1, t2, value):
+             return x.addcmul_(t1, t2, value=value)
+@@ -707,9 +710,9 @@ class GraphModule(torch.nn.Module):
+         which nvcc can optimize differently than separate div + fma kernels.
+         """
+         torch.manual_seed(42)
+-        x = torch.randn(64, 64, device="cuda")
+-        t1 = torch.randn(64, 64, device="cuda")
+-        t2 = torch.randn(64, 64, device="cuda") + 0.1
++        x = torch.randn(64, 64, device=device_type)
++        t1 = torch.randn(64, 64, device=device_type)
++        t2 = torch.randn(64, 64, device=device_type) + 0.1
+ 
+         def fn(x, t1, t2):
+             return x.addcdiv_(t1, t2, value=-0.01)
+@@ -728,10 +731,10 @@ class GraphModule(torch.nn.Module):
+         which nvcc can optimize differently than separate div + fma kernels.
+         """
+         torch.manual_seed(42)
+-        x = torch.randn(64, 64, device="cuda")
+-        t1 = torch.randn(64, 64, device="cuda")
+-        t2 = torch.randn(64, 64, device="cuda") + 0.1
+-        value = torch.tensor(-0.01, device="cuda")
++        x = torch.randn(64, 64, device=device_type)
++        t1 = torch.randn(64, 64, device=device_type)
++        t2 = torch.randn(64, 64, device=device_type) + 0.1
++        value = torch.tensor(-0.01, device=device_type)
+ 
+         def fn(x, t1, t2, value):
+             return x.addcdiv_(t1, t2, value=value)
+@@ -746,8 +749,8 @@ class GraphModule(torch.nn.Module):
+     def test_add_scalar_alpha_cuda(self):
+         """Compiled add_ with scalar alpha matches eager on CUDA."""
+         torch.manual_seed(42)
+-        x = torch.randn(64, 64, device="cuda")
+-        other = torch.randn(64, 64, device="cuda")
++        x = torch.randn(64, 64, device=device_type)
++        other = torch.randn(64, 64, device=device_type)
+ 
+         def fn(x, other):
+             return x.add_(other, alpha=2.3)
+diff --git a/test/dynamo/test_functions.py b/test/dynamo/test_functions.py
+index e7f416c6bc5..3546a546ffd 100644
+--- a/test/dynamo/test_functions.py
++++ b/test/dynamo/test_functions.py
+@@ -26,7 +26,9 @@ import torch._dynamo.test_case
+ import torch._dynamo.testing
+ from torch import sub
+ from torch._dynamo.exc import Unsupported
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+ from torch._dynamo.testing import (
++
+     CompileCounterWithBackend,
+     EagerAndRecordGraphs,
+     normalize_gm,
+@@ -38,6 +40,7 @@ from torch.nn import functional as F
+ from torch.testing._internal.common_utils import (
+     instantiate_parametrized_tests,
+     parametrize,
++    requires_cuda,
+ )
+ from torch.testing._internal.inductor_utils import HAS_GPU
+ 
+@@ -1281,7 +1284,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         if not x.is_cuda:
+             return x + 1
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     @make_test
+     def test_get_device_properties_tensor_device(a):
+         x = a.to("cuda")
+@@ -1311,7 +1314,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+         m = a.type("torch.HalfTensor")
+         return b.type(m.type())
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     @make_test
+     def test_tensor_type5(a, b):
+         m = a.type(torch.cuda.HalfTensor)
+diff --git a/test/dynamo/test_fx_annotate.py b/test/dynamo/test_fx_annotate.py
+index 5228a5978ae..6213ddd25c6 100644
+--- a/test/dynamo/test_fx_annotate.py
++++ b/test/dynamo/test_fx_annotate.py
+@@ -10,6 +10,9 @@ from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+ from torch.testing._internal.triton_utils import requires_cuda_and_triton
+ 
+ 
++
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
++
+ def checkpoint_wrapper(fn):
+     def inner(*args):
+         return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
+@@ -173,7 +176,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
+             a * b,
+             b,
+             dtype=torch.bfloat16,
+-            device="cuda",
++            device=device_type,
+             requires_grad=True,
+         )
+ 
+diff --git a/test/dynamo/test_guard_manager.py b/test/dynamo/test_guard_manager.py
+index 508f03d241c..319104f7a5c 100644
+--- a/test/dynamo/test_guard_manager.py
++++ b/test/dynamo/test_guard_manager.py
+@@ -11,9 +11,12 @@ import torch._dynamo.test_case
+ from torch._C._dynamo import guards
+ from torch._dynamo.convert_frame import GlobalStateGuard
+ from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+-from torch.testing._internal.common_utils import set_default_dtype
++from torch.testing._internal.common_utils import requires_cuda, set_default_dtype
+ 
+ 
++
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
++
+ RootGuardManager = guards.RootGuardManager
+ DictGuardManager = guards.DictGuardManager
+ GetAttrGuardAccessor = guards.GetAttrGuardAccessor
+@@ -445,7 +448,8 @@ user_stack=None)
+         del x
+         self.assertFalse(guard(weakref_x()))
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
++    @requires_cuda
+     def test_call_function_no_args_guard(self):
+         root = RootGuardManager()
+         x = torch.cuda.current_device()
+diff --git a/test/dynamo/test_higher_order_ops.py b/test/dynamo/test_higher_order_ops.py
+index 52ad5144f5f..04d025361f3 100644
+--- a/test/dynamo/test_higher_order_ops.py
++++ b/test/dynamo/test_higher_order_ops.py
+@@ -16,7 +16,9 @@ import torch.nn as nn
+ import torch.utils._pytree as pytree
+ import torch.utils.checkpoint
+ from torch._dynamo.backends.common import aot_autograd
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+ from torch._dynamo.testing import (
++
+     check_dynamic_shape_capture,
+     CompileCounter,
+     CompileCounterWithBackend,
+@@ -6913,8 +6915,8 @@ class ActivationCheckpointingTests(
+                 gn, torch.sin(x), y, use_reentrant=True
+             )
+ 
+-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
++        x = torch.randn(4, 4, device=device_type, requires_grad=True)
++        y = torch.randn(4, 4, device=device_type, requires_grad=True)
+ 
+         fw_compiler = functools.partial(
+             count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
+@@ -6939,8 +6941,8 @@ class ActivationCheckpointingTests(
+                 gn, torch.sin(x), y, use_reentrant=True
+             )
+ 
+-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
++        x = torch.randn(4, 4, device=device_type, requires_grad=True)
++        y = torch.randn(4, 4, device=device_type, requires_grad=True)
+ 
+         backend = "inductor"
+         self._validate(
+diff --git a/test/dynamo/test_logging.py b/test/dynamo/test_logging.py
+index cc7beb36137..694a15dd11f 100644
+--- a/test/dynamo/test_logging.py
++++ b/test/dynamo/test_logging.py
+@@ -37,7 +37,7 @@ from torch.testing._internal.logging_utils import (
+     make_logging_test,
+     make_settings_test,
+ )
+-from torch.testing._internal.triton_utils import requires_cuda_and_triton
++from torch.testing._internal.triton_utils import requires_accelerator_and_triton
+ 
+ 
+ requires_gpu = unittest.skipUnless(
+@@ -187,7 +187,7 @@ class LoggingTests(LoggingTestCase):
+             len(records), 8 * (1 + torch._inductor.config.loop_ordering_after_fusion)
+         )
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     @make_logging_test(cudagraphs=True)
+     def test_cudagraphs(self, records):
+         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
+@@ -431,7 +431,7 @@ Found from :
+         exitstack.close()
+ 
+     @requires_distributed()
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     @make_logging_test(ddp_graphs=True)
+     def test_ddp_graphs(self, records):
+         class ToyModel(torch.nn.Module):
+diff --git a/test/dynamo/test_minifier.py b/test/dynamo/test_minifier.py
+index 9ea0f287edc..7eea25511eb 100644
+--- a/test/dynamo/test_minifier.py
++++ b/test/dynamo/test_minifier.py
+@@ -7,6 +7,9 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
+ from torch.testing._internal.common_utils import skipIfNNModuleInlined
+ 
+ 
++
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
++
+ requires_gpu = unittest.skipUnless(
+     torch.cuda.is_available() or torch.xpu.is_available(), "requires cuda or xpu"
+ )
+diff --git a/test/dynamo/test_misc.py b/test/dynamo/test_misc.py
+index 16d0b027b0d..a65b7b4a868 100644
+--- a/test/dynamo/test_misc.py
++++ b/test/dynamo/test_misc.py
+@@ -48,7 +48,9 @@ from torch._dynamo.comptime import comptime
+ from torch._dynamo.eval_frame import _debug_get_cache_entry_list
+ from torch._dynamo.exc import Unsupported
+ from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+ from torch._dynamo.testing import (
++
+     CompileCounter,
+     CompileCounterWithBackend,
+     expectedFailureDynamic,
+@@ -269,8 +271,8 @@ class MiscTests(torch._inductor.test_case.TestCase):
+ 
+             return cumsum.sum()
+ 
+-        a = torch.rand(100, 30, device="cuda")
+-        b = torch.rand(100, 30, device="cuda")
++        a = torch.rand(100, 30, device=device_type)
++        b = torch.rand(100, 30, device=device_type)
+ 
+         torch._dynamo.decorators.mark_unbacked(a, 0)
+         torch._dynamo.decorators.mark_unbacked(a, 1)
+@@ -1030,7 +1032,7 @@ graph():
+         self.assertTrue(res.offloading_activation)
+ 
+     @unittest.skipIf(
+-        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
++        not torch.accelerator.is_available() or not (hasattr(torch.cuda, 'get_device_capability') and torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0)),
+         "requires Hopper+ (SM >= 9.0) for TMA",
+     )
+     @unittest.skipIf(
+@@ -1088,7 +1090,7 @@ graph():
+             )
+             return out
+ 
+-        x = torch.randn(M, N, device="cuda")
++        x = torch.randn(M, N, device=device_type)
+ 
+         from contextlib import contextmanager
+ 
+@@ -1106,7 +1108,7 @@ graph():
+         def fn_with_set_allocator(x):
+             triton.set_allocator(
+                 lambda size, alignment, stream: torch.empty(
+-                    size, device="cuda", dtype=torch.int8
++                    size, device=device_type, dtype=torch.int8
+                 )
+             )
+             return run_kernel(x)
+@@ -15714,7 +15716,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
+             opt_fn2 = torch.compile(fn2, backend="eager", fullgraph=True)
+             res = opt_fn2(x2)
+ 
+-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
++    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+     @torch._dynamo.config.patch(recompile_limit=999)
+     def test_legacy_cuda_tensor(self):
+         typs = [
+@@ -15903,9 +15905,9 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
+             result = x_bool * sentinel
+             return result
+ 
+-        x_true = torch.tensor([True], device="cuda")
+-        x_false = torch.tensor([False], device="cuda")
+-        sentinel = torch.tensor(2.0, requires_grad=True, device="cuda")
++        x_true = torch.tensor([True], device=device_type)
++        x_false = torch.tensor([False], device=device_type)
++        sentinel = torch.tensor(2.0, requires_grad=True, device=device_type)
+         eager_result_true = symbool_mul_fn(x_true, sentinel)
+         eager_result_false = symbool_mul_fn(x_false, sentinel)
+         compiled_fn = torch.compile(
+@@ -15931,9 +15933,9 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
+         compiled_guard_fn = torch.compile(
+             symbool_guard_fn, backend="eager", dynamic=True
+         )
+-        a_true = torch.tensor(True, device="cuda")
+-        a_false = torch.tensor(False, device="cuda")
+-        b = torch.randn(6, device="cuda")
++        a_true = torch.tensor(True, device=device_type)
++        a_false = torch.tensor(False, device=device_type)
++        b = torch.randn(6, device=device_type)
+         eager_res_true = symbool_guard_fn(a_true, b)
+         compiled_res_true = compiled_guard_fn(a_true, b)
+         self.assertEqual(eager_res_true, compiled_res_true)
+@@ -15954,8 +15956,8 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
+                 result = result.real
+             return result
+ 
+-        sentinel = torch.tensor(1.0, requires_grad=True, device="cuda")
+-        arg_0 = torch.tensor([True], dtype=torch.bool, device="cuda")
++        sentinel = torch.tensor(1.0, requires_grad=True, device=device_type)
++        arg_0 = torch.tensor([True], dtype=torch.bool, device=device_type)
+         args = (arg_0,) + (sentinel,)
+         try:
+             compiled_program = torch.compile(
+@@ -16034,7 +16036,7 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
+         with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
+             compiled = torch.compile(container, backend="eager", fullgraph=True)
+ 
+-            inp1 = torch.randn(4, 4, 4, device="cuda")
++            inp1 = torch.randn(4, 4, 4, device=device_type)
+ 
+             # First call with CUDA input
+             compiled_result1 = compiled(inp1)
+@@ -16059,13 +16061,13 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
+                 self.to("cpu")
+                 return x
+ 
+-        mod = Model().cuda()
++        mod = Model().to(device_type)
+         with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
+             fn = torch.compile(mod, backend="aot_eager", fullgraph=True)
+-            x = torch.randn(10, 10, device="cuda")
++            x = torch.randn(10, 10, device=device_type)
+             ref = fn(x)
+             self.assertEqual(str(mod.fc.weight.device), "cpu")
+-            mod.cuda()
++            mod.to(device_type)
+             ref = fn(
+                 x
+             )  # second time compile runs, we should also move the module to cpu device
+diff --git a/test/dynamo/test_package.py b/test/dynamo/test_package.py
+index 5f47a3745bf..6dbf9582043 100644
+--- a/test/dynamo/test_package.py
++++ b/test/dynamo/test_package.py
+@@ -17,7 +17,9 @@ from torch._dynamo.precompile_context import PrecompileContext
+ from torch._dynamo.testing import reduce_to_scalar_loss
+ from torch._functorch import config as functorch_config
+ from torch._inductor.runtime.runtime_utils import cache_dir
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+ from torch.testing._internal.common_utils import (
++
+     instantiate_parametrized_tests,
+     parametrize,
+ )
+@@ -67,7 +69,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
+         class MyModule(torch.nn.Module):
+             def __init__(self):
+                 super().__init__()
+-                self.linear = torch.nn.Linear(10, 10, device="cuda")
++                self.linear = torch.nn.Linear(10, 10, device=device_type)
+ 
+             def forward(self, x):
+                 return self.linear(x)
+@@ -75,7 +77,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
+         fn = MyModule()
+         package = CompilePackage(fn.forward)
+         compiled_fn = torch._dynamo.optimize("inductor", package=package)(fn)
+-        x = torch.randn(10, 10, device="cuda")
++        x = torch.randn(10, 10, device=device_type)
+         compiled_fn(x)
+ 
+     @parametrize("backend", ("eager", "inductor"))
+diff --git a/test/dynamo/test_recompile_ux.py b/test/dynamo/test_recompile_ux.py
+index b90635f1190..d8d27716a6d 100644
+--- a/test/dynamo/test_recompile_ux.py
++++ b/test/dynamo/test_recompile_ux.py
+@@ -12,6 +12,9 @@ from torch._dynamo.exc import FailOnRecompileLimitHit
+ from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
+ 
+ 
++
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
++
+ device_type = (
+     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+ )
+@@ -108,7 +111,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
+         )
+ 
+     @unittest.skipIf(
+-        not torch.cuda.is_available() and not torch.xpu.is_available(),
++        not torch.accelerator.is_available() and not torch.xpu.is_available(),
+         "requires cuda or xpu",
+     )
+     def test_nvfuser_guards(self):
+diff --git a/test/dynamo/test_regional_inductor.py b/test/dynamo/test_regional_inductor.py
+index 70d24836f35..5ad075c1115 100644
+--- a/test/dynamo/test_regional_inductor.py
++++ b/test/dynamo/test_regional_inductor.py
+@@ -20,7 +20,9 @@ from torch._inductor.test_case import run_tests
+ from torch._inductor.utils import run_fw_bw_and_get_code
+ from torch.fx._graph_pickler import GraphPickler
+ from torch.fx.passes.regional_inductor import regional_inductor
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+ from torch.fx.passes.regional_inductor_invoke_subgraph import (
++
+     regional_inductor_invoke_subgraph,
+ )
+ from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+@@ -29,7 +31,7 @@ from torch.testing._internal.common_utils import (
+     parametrize,
+     skipIfTorchDynamo,
+ )
+-from torch.testing._internal.triton_utils import requires_cuda_and_triton
++from torch.testing._internal.triton_utils import requires_accelerator_and_triton
+ 
+ 
+ if TYPE_CHECKING:
+@@ -243,7 +245,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
+         # once - so in total 2 (1 fwd + 1 bwd)
+         self.assertEqual(len(codes), 2)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     @parametrize("serialize", [False, True])
+     def test_flex_attention(self, serialize):
+         def _squared(score, b, h, m, n):
+@@ -268,7 +270,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
+             a * b,
+             b,
+             dtype=torch.bfloat16,
+-            device="cuda",
++            device=device_type,
+             requires_grad=True,
+         )
+ 
+@@ -426,7 +428,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
+         ):
+             opt_fn(x, y)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     @parametrize("serialize", [False, True])
+     def test_selective_ac_flex(self, serialize):
+         class FlexAttentionModule(torch.nn.Module):
+@@ -519,7 +521,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
+         flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
+             "cuda", dtype=torch.bfloat16
+         )
+-        x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
++        x = torch.ones(8, 1024, 512, device=device_type, dtype=torch.bfloat16)
+         compiled_module = torch.compile(
+             flex_module, backend=aot_eager_regional_inductor(), fullgraph=True
+         )
+@@ -925,7 +927,7 @@ def forward(self, arg0_1, arg1_1):
+                 ignore_empty_lines=True,
+             )
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     @parametrize("serialize", [False])  # , True
+     def test_flex_attention(self, serialize):
+         def _squared(score, b, h, m, n):
+@@ -959,7 +961,7 @@ def forward(self, arg0_1, arg1_1):
+             a * b,
+             b,
+             dtype=torch.bfloat16,
+-            device="cuda",
++            device=device_type,
+             requires_grad=True,
+         )
+ 
+@@ -1090,7 +1092,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
+                 }
+             )
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     @parametrize("serialize", [False])  # , True
+     def test_selective_ac_flex(self, serialize):
+         # must decompose the following fallback ops in inductor
+@@ -1200,7 +1202,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
+         flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
+             "cuda", dtype=torch.bfloat16
+         )
+-        x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
++        x = torch.ones(8, 1024, 512, device=device_type, dtype=torch.bfloat16)
+         compiled_module = torch.compile(
+             flex_module,
+             backend=aot_eager_regional_inductor(serialize, on_invoke_subgraph=True),
+diff --git a/test/dynamo/test_repros.py b/test/dynamo/test_repros.py
+index aa90b681038..82792145b8e 100644
+--- a/test/dynamo/test_repros.py
++++ b/test/dynamo/test_repros.py
+@@ -1,3 +1,5 @@
++
++
+ """
+ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+ with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
+@@ -34,6 +36,8 @@ from unittest import mock
+ import numpy as np
+ 
+ import torch
++
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+ import torch._dynamo.test_case
+ import torch._dynamo.testing
+ import torch._dynamo.utils
+@@ -76,6 +80,7 @@ from torch.testing._internal.common_device_type import (
+ from torch.testing._internal.common_utils import (
+     instantiate_parametrized_tests,
+     parametrize,
++    requires_accelerator,
+     serialTest,
+     skipIfHpu,
+     skipIfWindows,
+@@ -978,8 +983,9 @@ class IncByTwo:
+ 
+ 
+ class LRUCacheWarningTests(LoggingTestCase):
+-    @requires_cuda
++    @requires_accelerator
+     @make_logging_test(dynamo=logging.DEBUG)
++    @requires_cuda
+     def test_lru_cache_warning_issued_during_tracing(self, records):
+         prev_default = torch._C._get_default_device()
+ 
+@@ -4106,7 +4112,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
+         out2 = torch.empty(12, dtype=torch.int32)
+         opt_model(17, (12,), out2)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     @serialTest()
+     def test_mem_leak_guards(self):
+         def gn(x0, x):
+@@ -4127,10 +4133,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
+                 x = gn(running_x, x)
+                 return x
+ 
+-        mod = MyMod().cuda()
++        mod = MyMod().to(device_type)
+ 
+         fn = torch.compile(mod, backend="eager")
+-        x = torch.randn(10, 10, device="cuda")
++        x = torch.randn(10, 10, device=device_type)
+         torch.cuda.reset_peak_memory_stats()
+ 
+         fn(x)
+@@ -4141,6 +4147,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
+         peak_mem2 = torch.cuda.max_memory_allocated()
+         self.assertTrue(peak_mem1 == peak_mem2)
+ 
++    @requires_accelerator
+     @requires_cuda
+     def test_guard_default_device(self):
+         try:
+@@ -4966,8 +4973,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
+         # See https://github.com/pytorch/pytorch/issues/161010
+ 
+     def test_preserve_stride_with_clone(self) -> None:
+-        A = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
+-        B = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
++        A = torch.rand(5, 5, device=device_type if torch.cuda.is_available() else "cpu")
++        B = torch.rand(5, 5, device=device_type if torch.cuda.is_available() else "cpu")
+ 
+         def fn(
+             src: torch.Tensor, count: torch.Tensor
+@@ -6363,7 +6370,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
+ 
+         fn(torch.randn(4))
+ 
+-    @requires_cuda
++    @requires_accelerator
+     # test involves custom ops that return unbacked symints
+     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+     # test requires the activation memory budget code to think
+@@ -6415,13 +6422,13 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
+             z2 = torch.ops.test_partitioner.j(z, z2)
+             return torch.matmul(x, param).sin() * z2.sum()
+ 
+-        x = torch.randn(512, 512, device="cuda")
+-        param = torch.randn(512, 512, device="cuda", requires_grad=True)
++        x = torch.randn(512, 512, device=device_type)
++        param = torch.randn(512, 512, device=device_type, requires_grad=True)
+         out_ref = f(x, param)
+         out_test = torch.compile(f, backend="aot_eager_decomp_partition")(x, param)
+         self.assertEqual(out_ref, out_test)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     # This test will fail as flip in combination with particular input lengths
+     # produces weird results.
+     # This is under investigations in
+@@ -7776,6 +7783,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
+         self.assertEqual(model(*inputs), compiled_model(*inputs))
+ 
+     # https://github.com/pytorch/pytorch/issues/151670
++    @requires_accelerator
+     @requires_cuda
+     def test_diagonal_scatter_single_elem_cpu_with_cuda_tensor(self):
+         class Model(torch.nn.Module):
+@@ -8027,7 +8035,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+ 
+         f(torch.ones(2, device=device, dtype=torch.float64))
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_norm_dtype(self, device):
+         def foo(_stack0):
+             getitem = _stack0[(slice(None, None, None), -1)]
+@@ -8159,7 +8167,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+         self.assertEqual(fn(x), opt_fn(x))
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_memleak_when_graph_input_has_tensor_attr(self, device):
+         @torch.compile(backend="eager")
+         def f(x):
+@@ -8238,7 +8246,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+ 
+         self.assertEqual(cnt.frame_count, 1)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_sdpa_dynamic_shapes(self, device):
+         def f(x, s0, s1, s2):
+             q = x.view(2, s0, s2, s0)
+@@ -8260,7 +8268,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+             self.assertEqual(out_ref, out)
+ 
+     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "requires gpu with fp8 support")
+-    @requires_cuda
++    @requires_accelerator
+     def test_partitioner_saves_weights_for_bw(self):
+         def mul_tiled(a, *bs):
+             for b in bs:
+@@ -8348,17 +8356,17 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+                 super().__init__()
+                 self.a = torch.nn.Parameter(
+                     torch.randn(
+-                        64, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True
++                        64, 64, dtype=torch.bfloat16, device=device_type, requires_grad=True
+                     )
+                 )
+                 self.b = torch.nn.Parameter(
+                     torch.randn(
+-                        64, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True
++                        64, 64, dtype=torch.bfloat16, device=device_type, requires_grad=True
+                     )
+                 )
+                 self.bias = torch.nn.Parameter(
+                     torch.randn(
+-                        64, dtype=torch.bfloat16, device="cuda", requires_grad=True
++                        64, dtype=torch.bfloat16, device=device_type, requires_grad=True
+                     )
+                 )
+ 
+@@ -8370,7 +8378,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+                 out = out.unflatten(0, input.shape[:-1])
+                 return out
+ 
+-        m = CustomLinear(64, 64, dtype=torch.bfloat16, device="cuda")
++        m = CustomLinear(64, 64, dtype=torch.bfloat16, device=device_type)
+         m = torch.compile(m, backend="aot_eager")
+ 
+         # simple mode to track how many collective ops we saw in the backward
+@@ -8386,7 +8394,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+                 self.ops_counter[func] += 1
+                 return rs
+ 
+-        a = torch.randn(64, 64, dtype=torch.bfloat16, device="cuda", requires_grad=True)
++        a = torch.randn(64, 64, dtype=torch.bfloat16, device=device_type, requires_grad=True)
+         out = m(a)
+         with TrackingMode() as mode:
+             out.sum().backward()
+@@ -8527,7 +8535,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+         out2 = torch.compile(model, backend="eager")(input.clone())
+         self.assertEqual(out1, out2)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_zero_dim_param_mixed_device_grad(self):
+         # cpu 0-dim params with cuda grads
+         # https://github.com/pytorch/pytorch/issues/160084
+@@ -8556,10 +8564,10 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+     def test_cuda_sync(self):
+         def fn(x):
+             y = x + 1
+-            torch.cuda.synchronize()
++            torch.accelerator.synchronize()
+             return y * 2
+ 
+-        x = torch.ones(2, device="cuda")
++        x = torch.ones(2, device=device_type)
+         cnt = torch._dynamo.testing.CompileCounter()
+         opt_fn = torch.compile(fn, backend=cnt)
+         self.assertEqual(fn(x), opt_fn(x))
+@@ -8992,7 +9000,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+         self.assertEqual(cnt.frame_count, 2)
+ 
+     @skipIfHpu
+-    @requires_cuda
++    @requires_accelerator
+     def test_deterministic_pad_replicate_compile(self, device):
+         from torch.testing._internal.common_utils import DeterministicGuard
+ 
+@@ -9007,7 +9015,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
+             ref_grad = torch.autograd.grad(ref.sum(), x)
+             self.assertEqual(grad, ref_grad)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     @unittest.skipIf(
+         TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+         "flash attention not supported",
+diff --git a/test/dynamo/test_streams.py b/test/dynamo/test_streams.py
+index eeabfe03b93..46e1ab78673 100644
+--- a/test/dynamo/test_streams.py
++++ b/test/dynamo/test_streams.py
+@@ -12,7 +12,10 @@ from torch._dynamo.graph_bytecode_inputs import (
+     store_user_object_weakrefs,
+ )
+ from torch._dynamo.testing import extract_graph, remove_trailing_space
+-from torch.testing._internal.common_utils import requires_cuda
++from torch.testing._internal.common_utils import requires_accelerator, requires_cuda
++
++
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+ 
+ 
+ def remove_file_comment(gm_str: str) -> str:
+@@ -32,17 +35,17 @@ class TestStreams(torch._dynamo.test_case.TestCase):
+     def tearDownClass(cls):
+         super().tearDownClass()
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_stream_weakref(self):
+         s = torch.Stream()
+         weakref.ref(s)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_weakref(self):
+         e = torch.Event()
+         weakref.ref(e)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_stream_enter_exit(self):
+         def fn(x, y, s1, s2):
+             with s1:
+@@ -81,7 +84,7 @@ class <lambda>(torch.nn.Module):
+ """,
+         )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     @unittest.skip("Needs graph break support with annotation context")
+     def test_stream_context_graph_break(self):
+         def fn(x, y):
+@@ -110,20 +113,20 @@ class <lambda>(torch.nn.Module):
+         self.assertExpectedInline(print_graph(fw_graphs[0]), """""")
+         self.assertExpectedInline(print_graph(fw_graphs[1]), """""")
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_stream_input(self):
+         def fn(x, y, s):
+             z = torch.add(x, y)
+             y = z + 2
+             return y, s
+ 
+-        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2), torch.Stream(device="cuda"))
++        inp = (torch.ones(2, 2) + 1, torch.ones(2, 2), torch.Stream(device=device_type))
+         expected = fn(*inp)
+         fn_opt = torch.compile(fn, fullgraph=True)
+         actual = fn_opt(*inp)
+         self.assertEqual(expected, actual)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_local_stream_return(self):
+         def fn(x, y):
+             s = torch.Stream()
+@@ -141,14 +144,14 @@ class <lambda>(torch.nn.Module):
+         # Stream should be newly allocated on each call
+         self.assertNotEqual(s0, s1)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_get_current_stream_return(self):
+         def fn(x, s):
+             with s:
+                 s0 = torch.accelerator.current_stream()
+             return x, s0
+ 
+-        s_inp = torch.Stream(device="cuda")
++        s_inp = torch.Stream(device=device_type)
+         inp = (torch.ones(2, 2) + 1, s_inp)
+         fn_opt = torch.compile(fn, fullgraph=True)
+         _, s0 = fn_opt(*inp)
+@@ -158,31 +161,31 @@ class <lambda>(torch.nn.Module):
+ 
+     @requires_cuda
+     def test_cuda_current_stream_attrs(self):
+-        """Verify that torch.cuda.current_stream() attributes are accessible
++        """Verify that torch.accelerator.current_stream() attributes are accessible
+         under torch.compile and match eager behavior."""
+ 
+         def fn_cuda_stream(x):
+-            return torch.cuda.current_stream().cuda_stream
++            return torch.accelerator.current_stream().cuda_stream
+ 
+-        x = torch.zeros(1, device="cuda")
++        x = torch.zeros(1, device=device_type)
+         compiled = torch.compile(fn_cuda_stream, backend="eager", fullgraph=True)
+         self.assertEqual(compiled(x), fn_cuda_stream(x))
+ 
+     @requires_cuda
+     def test_cuda_current_stream_with_entered_stream(self):
+-        """Verify that torch.cuda.current_stream().cuda_stream returns the
++        """Verify that torch.accelerator.current_stream().cuda_stream returns the
+         correct value when inside a stream context for a user-created stream."""
+ 
+         def fn(x, s):
+             with s:
+-                return torch.cuda.current_stream().cuda_stream
++                return torch.accelerator.current_stream().cuda_stream
+ 
+-        s = torch.cuda.Stream()
+-        x = torch.zeros(1, device="cuda")
++        s = torch.get_device_module(device_type).Stream()
++        x = torch.zeros(1, device=device_type)
+         compiled = torch.compile(fn, backend="eager", fullgraph=True)
+         self.assertEqual(compiled(x, s), fn(x, s))
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_nested_stream_enter_exit(self):
+         def fn(x, y, s0, s1, s2):
+             with s1:
+@@ -236,7 +239,7 @@ class <lambda>(torch.nn.Module):
+     def test_nested_stream_enter_exit_graph_break(self):
+         pass
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_local_stream_enter_exit(self):
+         def fn(x, y):
+             s2 = torch.Stream()
+@@ -277,7 +280,7 @@ class <lambda>(torch.nn.Module):
+ """,
+         )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_local_stream_nested_enter_exit(self):
+         def fn(x, y):
+             s2 = torch.Stream()
+@@ -320,6 +323,7 @@ class <lambda>(torch.nn.Module):
+ """,
+         )
+ 
++    @requires_accelerator
+     @requires_cuda
+     def test_new_stream_api(self) -> None:
+         from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+@@ -345,6 +349,7 @@ class <lambda>(torch.nn.Module):
+ 
+         fn(torch.ones(2, 2, device="cuda:0"))
+ 
++    @requires_accelerator
+     @requires_cuda
+     def test_current_stream_api(self) -> None:
+         from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+@@ -376,7 +381,7 @@ class <lambda>(torch.nn.Module):
+ 
+         fn(torch.ones(2, 2, device="cuda:0"))
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_stream_with_mutation(self):
+         def fn(x, y):
+             s2 = torch.Stream()
+@@ -426,7 +431,7 @@ class <lambda>(torch.nn.Module):
+ """,
+         )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_stream_backward_simple(self) -> None:
+         def fn(x, y):
+             s2 = torch.Stream()
+@@ -506,6 +511,7 @@ class GraphModule(torch.nn.Module):
+ """,  # noqa: B950
+         )
+ 
++    @requires_accelerator
+     @requires_cuda
+     def test_stream_backward_sync(self) -> None:
+         def fn(x, y):
+@@ -612,7 +618,7 @@ class GraphModule(torch.nn.Module):
+ """,  # noqa: B950
+         )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_tracing(self):
+         def fn(x) -> None:
+             e = torch.Event()
+@@ -620,7 +626,7 @@ class GraphModule(torch.nn.Module):
+             x.add_(1)
+             return x
+ 
+-        inp = (torch.ones(2, 2, device="cuda"),)
++        inp = (torch.ones(2, 2, device=device_type),)
+         (
+             _,
+             _,
+@@ -643,7 +649,7 @@ class <lambda>(torch.nn.Module):
+ """,
+         )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_run_opcheck_fork_join(self):
+         from torch._dynamo.variables.streams import fork_stream, join_stream
+         from torch.library import opcheck
+@@ -665,7 +671,7 @@ class <lambda>(torch.nn.Module):
+             torch.accelerator.set_stream(original_stream)
+             reset_user_object_tracking()
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_run_opcheck_wait_record(self):
+         from torch._dynamo.variables.streams import record_event, wait_event
+         from torch.library import opcheck
+@@ -689,7 +695,7 @@ class <lambda>(torch.nn.Module):
+             torch.accelerator.set_stream(original_stream)
+             reset_user_object_tracking()
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_run_opcheck_wait_record_stream(self):
+         from torch._dynamo.variables.streams import wait_stream
+         from torch.library import opcheck
+@@ -709,7 +715,7 @@ class <lambda>(torch.nn.Module):
+         finally:
+             reset_user_object_tracking()
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_record_stream_problem_basic(self):
+         # see https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
+         # for what this tests/solves for
+@@ -728,7 +734,7 @@ class <lambda>(torch.nn.Module):
+ 
+             return z0, z
+ 
+-        inp = (torch.ones(2, 2, device="cuda", requires_grad=True),)
++        inp = (torch.ones(2, 2, device=device_type, requires_grad=True),)
+         (
+             actual,
+             _,
+@@ -797,7 +803,7 @@ class GraphModule(torch.nn.Module):
+ """,  # noqa: B950
+         )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_record_stream_problem_interleaved(self):
+         # see https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
+         # for what this tests/solves for
+@@ -829,7 +835,7 @@ class GraphModule(torch.nn.Module):
+             e.wait()
+             return z, z1, z2
+ 
+-        inp = (torch.ones(2, 2, device="cuda", requires_grad=True),)
++        inp = (torch.ones(2, 2, device=device_type, requires_grad=True),)
+         (
+             actual,
+             _,
+@@ -1008,6 +1014,7 @@ class GraphModule(torch.nn.Module):
+ """,  # noqa: B950
+         )
+ 
++    @requires_accelerator
+     @requires_cuda
+     def test_epilogue_copy_streams_inference(self):
+         def fn(x):
+@@ -1040,6 +1047,7 @@ class <lambda>(torch.nn.Module):
+ """,
+         )
+ 
++    @requires_accelerator
+     @requires_cuda
+     def test_epilogue_copy_streams_external(self):
+         @torch.compile(backend="eager")
+@@ -1056,7 +1064,7 @@ class <lambda>(torch.nn.Module):
+         ):
+             extract_graph(fn, *inp)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_control_deps_wrapping_record_event(self) -> None:
+         """Test wrapping record_event with control_deps on a two-stream graph.
+ 
+@@ -1065,8 +1073,8 @@ class <lambda>(torch.nn.Module):
+         """
+ 
+         def fn(x) -> torch.Tensor:
+-            s1 = torch.Stream(device="cuda")
+-            s2 = torch.Stream(device="cuda")
++            s1 = torch.Stream(device=device_type)
++            s2 = torch.Stream(device=device_type)
+             e = torch.Event()
+ 
+             with s1:
+@@ -1080,7 +1088,7 @@ class <lambda>(torch.nn.Module):
+ 
+             return w
+ 
+-        inp = (torch.ones(2, 2, device="cuda"),)
++        inp = (torch.ones(2, 2, device=device_type),)
+         (
+             _,
+             _,
+@@ -1122,7 +1130,7 @@ class <lambda>(torch.nn.Module):
+         wait_ctrl_node = control_deps_nodes[1]
+         self.assertIn(record_ctrl_node, wait_ctrl_node.args[0])
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_control_deps_wrapping_wait_event(self) -> None:
+         """Test wrapping wait_event with control_deps on a two-stream graph.
+ 
+@@ -1131,8 +1139,8 @@ class <lambda>(torch.nn.Module):
+         """
+ 
+         def fn(x) -> torch.Tensor:
+-            s1 = torch.Stream(device="cuda")
+-            s2 = torch.Stream(device="cuda")
++            s1 = torch.Stream(device=device_type)
++            s2 = torch.Stream(device=device_type)
+             e = torch.Event()
+ 
+             with s1:
+@@ -1146,7 +1154,7 @@ class <lambda>(torch.nn.Module):
+ 
+             return z
+ 
+-        inp = (torch.ones(2, 2, device="cuda"),)
++        inp = (torch.ones(2, 2, device=device_type),)
+         (
+             _,
+             _,
+@@ -1171,7 +1179,7 @@ class <lambda>(torch.nn.Module):
+         )
+         self.assertEqual(len(control_deps_nodes), 2)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_control_deps_prevents_invalid_reordering(self) -> None:
+         """
+         Test that control_deps creates proper data dependencies that prevent invalid reordering.
+@@ -1183,8 +1191,8 @@ class <lambda>(torch.nn.Module):
+         """
+ 
+         def fn(x) -> torch.Tensor:
+-            s1 = torch.Stream(device="cuda")
+-            s2 = torch.Stream(device="cuda")
++            s1 = torch.Stream(device=device_type)
++            s2 = torch.Stream(device=device_type)
+             e = torch.Event()
+ 
+             with s1:
+@@ -1198,7 +1206,7 @@ class <lambda>(torch.nn.Module):
+ 
+             return w
+ 
+-        inp = (torch.ones(2, 2, device="cuda"),)
++        inp = (torch.ones(2, 2, device=device_type),)
+         (
+             _,
+             _,
+@@ -1248,7 +1256,7 @@ class <lambda>(torch.nn.Module):
+         with self.assertRaises(RuntimeError):
+             graph.lint()
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_cross_event_deps_multiple_events(self) -> None:
+         """Stress test: multiple events across three streams.
+ 
+@@ -1263,9 +1271,9 @@ class <lambda>(torch.nn.Module):
+         """
+ 
+         def fn(x) -> torch.Tensor:
+-            s1 = torch.Stream(device="cuda")
+-            s2 = torch.Stream(device="cuda")
+-            s3 = torch.Stream(device="cuda")
++            s1 = torch.Stream(device=device_type)
++            s2 = torch.Stream(device=device_type)
++            s3 = torch.Stream(device=device_type)
+             e1 = torch.Event()
+             e2 = torch.Event()
+ 
+@@ -1285,7 +1293,7 @@ class <lambda>(torch.nn.Module):
+ 
+             return a + b + y + z
+ 
+-        inp = (torch.ones(2, 2, device="cuda"),)
++        inp = (torch.ones(2, 2, device=device_type),)
+         # Patch out wrapping so we get the raw graph to manually wrap below.
+         with patch(
+             "torch._functorch._aot_autograd.graph_capture.wrap_all_sync_nodes_with_control_deps"
+@@ -1346,7 +1354,7 @@ class <lambda>(torch.nn.Module):
+ 
+         graph.lint()
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_cross_event_deps_event_reuse(self) -> None:
+         """Test that reusing an event updates the cross-event dependency.
+ 
+@@ -1356,8 +1364,8 @@ class <lambda>(torch.nn.Module):
+         """
+ 
+         def fn(x) -> torch.Tensor:
+-            s1 = torch.Stream(device="cuda")
+-            s2 = torch.Stream(device="cuda")
++            s1 = torch.Stream(device=device_type)
++            s2 = torch.Stream(device=device_type)
+             e = torch.Event()
+ 
+             with s1:
+@@ -1372,7 +1380,7 @@ class <lambda>(torch.nn.Module):
+ 
+             return w + z
+ 
+-        inp = (torch.ones(2, 2, device="cuda"),)
++        inp = (torch.ones(2, 2, device=device_type),)
+         (
+             _,
+             _,
+@@ -1404,6 +1412,7 @@ class <lambda>(torch.nn.Module):
+ 
+         graph.lint()
+ 
++    @requires_accelerator
+     @requires_cuda
+     def test_epilogue_copy_stream_tracking(self):
+         """
+@@ -1485,7 +1494,7 @@ class GraphModule(torch.nn.Module):
+ """,
+         )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_inductor_lowering(self):
+         with patch("torch._inductor.config.implicit_fallbacks", False):
+ 
+@@ -1496,7 +1505,7 @@ class GraphModule(torch.nn.Module):
+                 e.record()
+                 return x
+ 
+-            inp = (torch.ones(2, 2, device="cuda"),)
++            inp = (torch.ones(2, 2, device=device_type),)
+             fn(*inp)
+ 
+     def test_is_marked_side_effectful(self):
+@@ -1519,6 +1528,7 @@ class GraphModule(torch.nn.Module):
+             torch.fx.node._side_effectful_functions,
+         )
+ 
++    @requires_accelerator
+     @requires_cuda
+     def test_backward_sync_control_deps_e2e(self) -> None:
+         """
+@@ -1592,7 +1602,7 @@ class GraphModule(torch.nn.Module):
+             # Should not raise due to signature mismatch
+             torch.ops.streams.record_stream.default(t, 0)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_record_stream(self):
+         backend = torch._dynamo.testing.EagerAndRecordGraphs()
+ 
+@@ -1602,7 +1612,7 @@ class GraphModule(torch.nn.Module):
+             return x
+ 
+         compiled = torch.compile(fn, backend=backend, fullgraph=True)
+-        compiled(torch.randn(4, device="cuda"))
++        compiled(torch.randn(4, device=device_type))
+ 
+         self.assertEqual(len(backend.graphs), 1)
+         found = any(
+@@ -1611,7 +1621,7 @@ class GraphModule(torch.nn.Module):
+         )
+         self.assertTrue(found, "record_stream op not found in graph")
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_record_after_input_mutation_errors(self):
+         def fn(x):
+             s = torch.Stream()
+@@ -1623,10 +1633,10 @@ class GraphModule(torch.nn.Module):
+ 
+         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+             torch.compile(fn, backend="eager", fullgraph=True)(
+-                torch.ones(2, 2, device="cuda")
++                torch.ones(2, 2, device=device_type)
+             )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_record_after_input_mutation_stack_traces(self):
+         def fn(x):
+             s = torch.Stream()
+@@ -1638,7 +1648,7 @@ class GraphModule(torch.nn.Module):
+ 
+         try:
+             torch.compile(fn, backend="eager", fullgraph=True)(
+-                torch.ones(2, 2, device="cuda")
++                torch.ones(2, 2, device=device_type)
+             )
+             self.fail("Expected RuntimeError")
+         except RuntimeError as e:
+@@ -1648,7 +1658,7 @@ class GraphModule(torch.nn.Module):
+             self.assertIn("Event record occurred here:", msg)
+             self.assertIn("e.record()", msg)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_record_after_input_mutation_record_event(self):
+         def fn(x):
+             s = torch.Stream()
+@@ -1659,10 +1669,10 @@ class GraphModule(torch.nn.Module):
+ 
+         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+             torch.compile(fn, backend="eager", fullgraph=True)(
+-                torch.ones(2, 2, device="cuda")
++                torch.ones(2, 2, device=device_type)
+             )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_record_after_input_mutation_through_view(self):
+         def fn(x):
+             s = torch.Stream()
+@@ -1675,10 +1685,10 @@ class GraphModule(torch.nn.Module):
+ 
+         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+             torch.compile(fn, backend="eager", fullgraph=True)(
+-                torch.ones(2, 2, device="cuda")
++                torch.ones(2, 2, device=device_type)
+             )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_record_after_input_mutation_input_event(self):
+         def fn(x, e):
+             s = torch.Stream()
+@@ -1689,11 +1699,11 @@ class GraphModule(torch.nn.Module):
+ 
+         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+             torch.compile(fn, backend="eager", fullgraph=True)(
+-                torch.ones(2, 2, device="cuda"),
++                torch.ones(2, 2, device=device_type),
+                 torch.Event(),
+             )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_record_before_input_mutation_no_error(self):
+         def fn(x):
+             s = torch.Stream()
+@@ -1704,10 +1714,10 @@ class GraphModule(torch.nn.Module):
+             return e
+ 
+         torch.compile(fn, backend="eager", fullgraph=True)(
+-            torch.ones(2, 2, device="cuda")
++            torch.ones(2, 2, device=device_type)
+         )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_record_on_different_stream_no_error(self):
+         def fn(x):
+             s0 = torch.Stream()
+@@ -1720,10 +1730,10 @@ class GraphModule(torch.nn.Module):
+             return e
+ 
+         torch.compile(fn, backend="eager", fullgraph=True)(
+-            torch.ones(2, 2, device="cuda")
++            torch.ones(2, 2, device=device_type)
+         )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_not_returned_no_error(self):
+         def fn(x):
+             s = torch.Stream()
+@@ -1735,18 +1745,18 @@ class GraphModule(torch.nn.Module):
+ 
+         with self.assertRaisesRegex(RuntimeError, "An event was recorded on a stream"):
+             torch.compile(fn, backend="eager", fullgraph=True)(
+-                torch.ones(2, 2, device="cuda")
++                torch.ones(2, 2, device=device_type)
+             )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_cuda_event_record_on_stream(self):
+         """torch.cuda.Event should be accepted by torch.Stream.record_event (C++ type check)."""
+-        s = torch.Stream(device="cuda")
+-        e = torch.cuda.Event()
++        s = torch.Stream(device=device_type)
++        e = torch.get_device_module(device_type).Event()
+         # This hits THPStream_record_event in Stream.cpp which does a type check
+         s.record_event(e)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_synchronize_tracing(self):
+         def fn(x):
+             e = torch.Event()
+@@ -1755,7 +1765,7 @@ class GraphModule(torch.nn.Module):
+             e.synchronize()
+             return x
+ 
+-        inp = (torch.ones(2, 2, device="cuda"),)
++        inp = (torch.ones(2, 2, device=device_type),)
+         (
+             _,
+             _,
+@@ -1787,7 +1797,7 @@ class <lambda>(torch.nn.Module):
+ """,  # noqa: B950
+         )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_synchronize_inductor_lowering(self):
+         with patch("torch._inductor.config.implicit_fallbacks", False):
+ 
+@@ -1799,10 +1809,10 @@ class <lambda>(torch.nn.Module):
+                 e.synchronize()
+                 return x
+ 
+-            inp = (torch.ones(2, 2, device="cuda"),)
++            inp = (torch.ones(2, 2, device=device_type),)
+             fn(*inp)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_control_deps_wrapping_synchronize_event(self) -> None:
+         """Test that synchronize_event threads recorded ops' values through.
+ 
+@@ -1821,7 +1831,7 @@ class <lambda>(torch.nn.Module):
+             z = y * 2
+             return z
+ 
+-        inp = (torch.ones(2, 2, device="cuda"),)
++        inp = (torch.ones(2, 2, device=device_type),)
+         # Patch out wrapping so we get the raw graph to manually wrap below.
+         with patch(
+             "torch._functorch._aot_autograd.graph_capture.wrap_all_sync_nodes_with_control_deps"
+@@ -1920,7 +1930,7 @@ class <lambda>(torch.nn.Module):
+             "mul should depend on synchronize_event's getitem, not record_event's",
+         )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_external_event_synchronize_threads_inputs(self) -> None:
+         """When the event was recorded externally, synchronize threads graph inputs through."""
+ 
+@@ -1932,7 +1942,7 @@ class <lambda>(torch.nn.Module):
+             z = y * 2
+             return z
+ 
+-        inp = (torch.ones(2, 2, device="cuda"),)
++        inp = (torch.ones(2, 2, device=device_type),)
+         # Patch out wrapping so we get the raw graph to manually wrap below.
+         with patch(
+             "torch._functorch._aot_autograd.graph_capture.wrap_all_sync_nodes_with_control_deps"
+@@ -2001,7 +2011,7 @@ class <lambda>(torch.nn.Module):
+ """,  # noqa: B950
+         )
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_synchronize_control_deps_e2e(self):
+         """E2E: compute → record → synchronize → use result through torch.compile."""
+ 
+@@ -2013,12 +2023,12 @@ class <lambda>(torch.nn.Module):
+             z = y * 2
+             return z
+ 
+-        inp = torch.ones(2, 2, device="cuda")
++        inp = torch.ones(2, 2, device=device_type)
+         eager_result = f(inp)
+         compiled_result = torch.compile(f)(inp)
+         self.assertEqual(eager_result, compiled_result)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_synchronize_e2e(self):
+         def f(a_list):
+             a_cpu_list = []
+@@ -2037,15 +2047,15 @@ class <lambda>(torch.nn.Module):
+ 
+         f_compiled = torch.compile(f)
+         inputs = [
+-            torch.rand(100, dtype=torch.float16, device="cuda") for _ in range(10)
++            torch.rand(100, dtype=torch.float16, device=device_type) for _ in range(10)
+         ]
+         eager_result = f(inputs)
+         compiled_result = f_compiled(inputs)
+         self.assertEqual(eager_result, compiled_result)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_event_record_wait_on_default_stream(self):
+-        e = torch.cuda.Event()
++        e = torch.get_device_module(device_type).Event()
+ 
+         def f(x):
+             y = x + 1
+@@ -2054,12 +2064,12 @@ class <lambda>(torch.nn.Module):
+             return y + 1
+ 
+         f_compiled = torch.compile(f)
+-        x = torch.randn(10, device="cuda")
++        x = torch.randn(10, device=device_type)
+         eager_result = f(x)
+         compiled_result = f_compiled(x)
+         self.assertEqual(eager_result, compiled_result)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_record_stream_inductor_output_code(self) -> None:
+         """Verify record_stream is ordered between the producing kernel and the
+         consuming kernel in inductor-generated wrapper code."""
+@@ -2067,14 +2077,14 @@ class <lambda>(torch.nn.Module):
+         from torch.testing import FileCheck
+ 
+         def fn(x):
+-            s = torch.Stream(device="cuda")
++            s = torch.Stream(device=device_type)
+             y = x + 1
+             y.record_stream(s)
+             z = y * 2
+             return z
+ 
+         compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+-        x = torch.randn(1024, device="cuda")
++        x = torch.randn(1024, device=device_type)
+         result, (code,) = run_and_get_code(compiled, x)
+         self.assertEqual(result, (x + 1) * 2)
+ 
+@@ -2084,7 +2094,7 @@ class <lambda>(torch.nn.Module):
+             "torch.ops.streams.record_stream.default("
+         ).check("return").run(code)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_del_multi_stream_sync_dealloc(self):
+         def fn(x, y):
+             s = torch.Stream()
+@@ -2097,7 +2107,7 @@ class <lambda>(torch.nn.Module):
+             del x
+             return z0, z
+ 
+-        inp = (torch.ones(2, 2, device="cuda"), torch.ones(2, 2, device="cuda"))
++        inp = (torch.ones(2, 2, device=device_type), torch.ones(2, 2, device=device_type))
+         expected = fn(*inp)
+         (
+             actual,
+@@ -2111,7 +2121,7 @@ class <lambda>(torch.nn.Module):
+         self.assertIn("sync_dealloc", graph_str)
+         self.assertIn("record_event", graph_str)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_del_same_stream_no_sync_dealloc(self):
+         def fn(x, y):
+             s = torch.Stream()
+@@ -2123,7 +2133,7 @@ class <lambda>(torch.nn.Module):
+             e.wait()
+             return z
+ 
+-        inp = (torch.ones(2, 2, device="cuda"), torch.ones(2, 2, device="cuda"))
++        inp = (torch.ones(2, 2, device=device_type), torch.ones(2, 2, device=device_type))
+         expected = fn(*inp)
+         (
+             actual,
+@@ -2136,14 +2146,14 @@ class <lambda>(torch.nn.Module):
+         graph_str = print_graph(fw_graphs[0])
+         self.assertNotIn("sync_dealloc", graph_str)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_del_single_stream_no_sync_dealloc(self):
+         def fn(x, y):
+             z = torch.add(x, y)
+             del x
+             return z
+ 
+-        inp = (torch.ones(2, 2, device="cuda"), torch.ones(2, 2, device="cuda"))
++        inp = (torch.ones(2, 2, device=device_type), torch.ones(2, 2, device=device_type))
+         expected = fn(*inp)
+         (
+             actual,
+@@ -2156,7 +2166,7 @@ class <lambda>(torch.nn.Module):
+         graph_str = print_graph(fw_graphs[0])
+         self.assertNotIn("sync_dealloc", graph_str)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_del_attr_multi_stream_sync_dealloc(self):
+         class Holder:
+             pass
+@@ -2174,7 +2184,7 @@ class <lambda>(torch.nn.Module):
+             del h.tensor
+             return z0, z
+ 
+-        inp = (torch.ones(2, 2, device="cuda"), torch.ones(2, 2, device="cuda"))
++        inp = (torch.ones(2, 2, device=device_type), torch.ones(2, 2, device=device_type))
+         expected = fn(*inp)
+         (
+             actual,
+@@ -2188,7 +2198,7 @@ class <lambda>(torch.nn.Module):
+         self.assertIn("sync_dealloc", graph_str)
+         self.assertIn("record_event", graph_str)
+ 
+-    @requires_cuda
++    @requires_accelerator
+     def test_del_subscr_multi_stream_sync_dealloc(self):
+         def fn(x, y):
+             s = torch.Stream()
+@@ -2202,7 +2212,7 @@ class <lambda>(torch.nn.Module):
+             del d["t"]
+             return z0, z
+ 
+-        inp = (torch.ones(2, 2, device="cuda"), torch.ones(2, 2, device="cuda"))
++        inp = (torch.ones(2, 2, device=device_type), torch.ones(2, 2, device=device_type))
+         expected = fn(*inp)
+         (
+             actual,
+diff --git a/test/dynamo/test_structured_trace.py b/test/dynamo/test_structured_trace.py
+index efd1322c6d5..4769d92165f 100644
+--- a/test/dynamo/test_structured_trace.py
++++ b/test/dynamo/test_structured_trace.py
+@@ -28,6 +28,9 @@ from torch.testing._internal.triton_utils import requires_cuda_and_triton
+ if torch.distributed.is_available():
+     from torch.testing._internal.distributed.fake_pg import FakeStore
+ 
++
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
++
+ HAS_TLPARSE = shutil.which("tlparse") is not None
+ requires_tlparse = unittest.skipUnless(HAS_TLPARSE, "requires tlparse")
+ requires_distributed = functools.partial(
+@@ -60,7 +63,7 @@ def inductor_error_fn(a):
+ 
+ 
+ def inductor_schedule_fn(a):
+-    output = a.add(torch.ones(1000, 1000, device="cuda"))
++    output = a.add(torch.ones(1000, 1000, device=device_type))
+     return output
+ 
+ 
+@@ -322,7 +325,7 @@ class StructuredTraceTest(TestCase):
+     @requires_cuda_and_triton
+     def test_schedule(self):
+         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
+-        fn_opt(torch.ones(1000, 1000, device="cuda"))
++        fn_opt(torch.ones(1000, 1000, device=device_type))
+         self.assertExpectedInline(
+             self.buffer.getvalue(),
+             """\
+@@ -356,7 +359,7 @@ class StructuredTraceTest(TestCase):
+     @requires_cuda_and_triton
+     def test_cudagraphs(self):
+         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
+-        fn_opt(torch.ones(1000, 1000, device="cuda"))
++        fn_opt(torch.ones(1000, 1000, device=device_type))
+         self.assertExpectedInline(
+             self.buffer.getvalue(),
+             """\
+@@ -1286,9 +1289,9 @@ def forward(self, x_1: "f32[2][1]cpu"):
+             with self._setup_runtime_estimates_capture() as payload_buffer:
+                 torch._dynamo.reset()
+ 
+-                mod = SimpleModule().cuda()
++                mod = SimpleModule().to(device_type)
+                 compiled = torch.compile(mod, backend="inductor")
+-                compiled(torch.randn(4, 4, device="cuda"))
++                compiled(torch.randn(4, 4, device=device_type))
+ 
+                 # Verify runtime + tensor meta artifact was logged
+                 self.assertIn(
+@@ -1353,9 +1356,9 @@ def forward(self, x_1: "f32[2][1]cpu"):
+             with self._setup_runtime_estimates_capture() as payload_buffer:
+                 torch._dynamo.reset()
+ 
+-                mod = MixedModule().cuda()
++                mod = MixedModule().to(device_type)
+                 compiled = torch.compile(mod, backend="inductor")
+-                compiled(torch.randn(4, 4, device="cuda"))
++                compiled(torch.randn(4, 4, device=device_type))
+ 
+                 # Verify artifact was logged
+                 self.assertIn(
+@@ -1407,9 +1410,9 @@ def forward(self, x_1: "f32[2][1]cpu"):
+         try:
+             with self._setup_runtime_estimates_capture() as payload_buffer:
+                 torch._dynamo.reset()
+-                mod = Mixed().cuda()
++                mod = Mixed().to(device_type)
+                 compiled = torch.compile(mod, backend="inductor")
+-                compiled(torch.randn(4, 4, device="cuda"))
++                compiled(torch.randn(4, 4, device=device_type))
+                 payload = payload_buffer.getvalue().strip()
+                 if payload:
+                     data = json.loads(payload)
+diff --git a/test/dynamo/test_subclasses.py b/test/dynamo/test_subclasses.py
+index f66430ee8bd..279063ac0e2 100644
+--- a/test/dynamo/test_subclasses.py
++++ b/test/dynamo/test_subclasses.py
+@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (
+     parametrize,
+     subtest,
+ )
+-from torch.testing._internal.triton_utils import requires_cuda_and_triton
++from torch.testing._internal.triton_utils import requires_accelerator_and_triton
+ from torch.testing._internal.two_tensor import TwoTensor
+ from torch.utils._python_dispatch import return_and_correct_aliasing
+ 
+@@ -4022,7 +4022,7 @@ class GraphModule(torch.nn.Module):
+     def test_basic_autograd(self):
+         self._test_autograd("aot_eager")
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_basic_autograd_inductor(self):
+         self._test_autograd("inductor")
+ 
+diff --git a/test/dynamo/test_trace_rules.py b/test/dynamo/test_trace_rules.py
+index dfa9027d66d..03bf8196531 100644
+--- a/test/dynamo/test_trace_rules.py
++++ b/test/dynamo/test_trace_rules.py
+@@ -13,7 +13,9 @@ import torch._dynamo.config as config
+ import torch._dynamo.test_case
+ import torch._functorch.deprecated as deprecated_func
+ from torch._dynamo.testing import CompileCounter
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+ from torch._dynamo.trace_rules import (
++
+     LEGACY_MOD_INLINELIST,
+     load_object,
+     lookup_inner,
+diff --git a/test/dynamo/test_unspec.py b/test/dynamo/test_unspec.py
+index c27fe14a0e9..49308794dc1 100644
+--- a/test/dynamo/test_unspec.py
++++ b/test/dynamo/test_unspec.py
+@@ -13,7 +13,7 @@ import torch.nn.functional as F
+ from torch._dynamo.comptime import comptime
+ from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, same
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+-from torch.testing._internal.common_utils import requires_cuda, skipIfWindows
++from torch.testing._internal.common_utils import requires_accelerator, requires_cuda, skipIfWindows
+ from torch.testing._internal.logging_utils import logs_to_string
+ 
+ 
+@@ -24,6 +24,9 @@ from torch.testing._internal.logging_utils import logs_to_string
+ # test_dynamic_shapes will cover both the YOLO and non-YOLO cases.
+ 
+ 
++
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
++
+ @torch._dynamo.config.patch(assume_static_by_default=False)
+ class UnspecTests(torch._dynamo.test_case.TestCase):
+     def test_numpy_correctness(self):
+@@ -63,6 +66,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
+         self.assertEqual(cnts.frame_count, 1)
+         self.assertEqual(cnts.op_count, 2)
+ 
++    @requires_accelerator
+     @requires_cuda
+     def test_no_recompilations_with_efficient_attention(self):
+         def fn(q, k, v, attn_mask):
+diff --git a/test/dynamo/test_wrap_inductor_compiled_regions.py b/test/dynamo/test_wrap_inductor_compiled_regions.py
+index 0f2d335adfe..bbc661cdc29 100644
+--- a/test/dynamo/test_wrap_inductor_compiled_regions.py
++++ b/test/dynamo/test_wrap_inductor_compiled_regions.py
+@@ -10,9 +10,11 @@ from torch._dynamo.utils import counters
+ from torch._functorch import config as functorch_config
+ from torch._inductor import config as inductor_config
+ from torch.nn.attention.flex_attention import flex_attention, flex_attention_hop
+-from torch.testing._internal.triton_utils import requires_cuda_and_triton
++from torch.testing._internal.triton_utils import requires_accelerator_and_triton
+ from torch.utils._debug_mode import DebugMode
++device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+ from torch.utils.checkpoint import (
++
+     checkpoint,
+     CheckpointPolicy,
+     create_selective_checkpoint_contexts,
+@@ -72,7 +74,7 @@ def count_ops(
+ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+     """Tests for wrap_inductor_compiled_regions option"""
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_wrap_enabled_visible_in_debug_mode(self):
+         """Test that compiled regions are wrapped when option is enabled"""
+ 
+@@ -84,8 +86,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         def fn(x, y):
+             return torch.matmul(x, y)
+ 
+-        x = torch.randn(4, 4, device="cuda")
+-        y = torch.randn(4, 4, device="cuda")
++        x = torch.randn(4, 4, device=device_type)
++        y = torch.randn(4, 4, device=device_type)
+ 
+         with DebugMode() as debug_mode:
+             result = fn(x, y)
+@@ -99,7 +101,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         expected = torch.matmul(x, y)
+         self.assertEqual(result, expected)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_wrap_name_visible_in_debug_mode(self):
+         """Test that named compiled regions surface their name in DebugMode"""
+ 
+@@ -112,8 +114,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         def fn(x, y):
+             return torch.matmul(x, y)
+ 
+-        x = torch.randn(4, 4, device="cuda")
+-        y = torch.randn(4, 4, device="cuda")
++        x = torch.randn(4, 4, device=device_type)
++        y = torch.randn(4, 4, device=device_type)
+ 
+         with DebugMode() as debug_mode:
+             result = fn(x, y)
+@@ -126,7 +128,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         expected = torch.matmul(x, y)
+         self.assertEqual(result, expected)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_wrap_disabled_not_visible_in_debug_mode(self):
+         """Test that compiled regions are not wrapped when option is disabled"""
+ 
+@@ -138,8 +140,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         def fn(x, y):
+             return torch.matmul(x, y)
+ 
+-        x = torch.randn(4, 4, device="cuda")
+-        y = torch.randn(4, 4, device="cuda")
++        x = torch.randn(4, 4, device=device_type)
++        y = torch.randn(4, 4, device=device_type)
+ 
+         with DebugMode() as debug_mode:
+             result = fn(x, y)
+@@ -153,7 +155,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         expected = torch.matmul(x, y)
+         self.assertEqual(result, expected)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_wrap_default_disabled(self):
+         """Test that wrapping is disabled by default"""
+ 
+@@ -161,8 +163,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         def fn(x, y):
+             return torch.matmul(x, y)
+ 
+-        x = torch.randn(4, 4, device="cuda")
+-        y = torch.randn(4, 4, device="cuda")
++        x = torch.randn(4, 4, device=device_type)
++        y = torch.randn(4, 4, device=device_type)
+ 
+         with DebugMode() as debug_mode:
+             result = fn(x, y)
+@@ -176,7 +178,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         expected = torch.matmul(x, y)
+         self.assertEqual(result, expected)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_wrap_with_backward(self):
+         """Test that wrapping works correctly with backward pass"""
+ 
+@@ -188,8 +190,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         def fn(x, y):
+             return torch.matmul(x, y)
+ 
+-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
++        x = torch.randn(4, 4, device=device_type, requires_grad=True)
++        y = torch.randn(4, 4, device=device_type, requires_grad=True)
+ 
+         # Clone for eager comparison
+         x_eager = x.detach().clone().requires_grad_(True)
+@@ -216,7 +218,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         self.assertEqual(x.grad, x_eager.grad)
+         self.assertEqual(y.grad, y_eager.grad)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_wrap_with_multiple_ops(self):
+         """Test wrapping with a function that has multiple operations"""
+ 
+@@ -231,8 +233,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+             c = b + x
+             return c
+ 
+-        x = torch.randn(4, 4, device="cuda")
+-        y = torch.randn(4, 4, device="cuda")
++        x = torch.randn(4, 4, device=device_type)
++        y = torch.randn(4, 4, device=device_type)
+ 
+         with DebugMode() as debug_mode:
+             result = fn(x, y)
+@@ -248,7 +250,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         expected = b + x
+         self.assertEqual(result, expected)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_wrap_option_type_validation(self):
+         """Test that wrap_inductor_compiled_regions validates type correctly"""
+ 
+@@ -267,7 +269,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         def fn_false(x):
+             return x + 1
+ 
+-        x = torch.randn(4, device="cuda")
++        x = torch.randn(4, device=device_type)
+         _ = fn_true(x)
+         _ = fn_false(x)
+ 
+@@ -283,7 +285,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+ 
+         self.assertIn("Unexpected type", str(cm.exception))
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_wrap_per_compilation(self):
+         """Test that wrap option is per-compilation, not global"""
+ 
+@@ -303,8 +305,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         def fn_not_wrapped(x, y):
+             return torch.matmul(x, y)
+ 
+-        x = torch.randn(4, 4, device="cuda")
+-        y = torch.randn(4, 4, device="cuda")
++        x = torch.randn(4, 4, device=device_type)
++        y = torch.randn(4, 4, device=device_type)
+ 
+         # First function should be wrapped
+         with DebugMode() as debug_mode1:
+@@ -316,7 +318,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+             _ = fn_not_wrapped(x, y)
+         self.assertNotIn("inductor_compiled_code", debug_mode2.debug_string())
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     @inductor_config.patch("fx_graph_cache", True)
+     @inductor_config.patch("fx_graph_remote_cache", False)
+     @functorch_config.patch({"enable_autograd_cache": True})
+@@ -332,8 +334,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         def fn(x, y):
+             return torch.matmul(x, y)
+ 
+-        x = torch.randn(4, 4, device="cuda")
+-        y = torch.randn(4, 4, device="cuda")
++        x = torch.randn(4, 4, device=device_type)
++        y = torch.randn(4, 4, device=device_type)
+ 
+         # Clear all caches and counters
+         counters.clear()
+@@ -396,7 +398,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         self.assertEqual(result1, expected)
+         self.assertEqual(result2, expected)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     @inductor_config.patch("fx_graph_cache", True)
+     @inductor_config.patch("fx_graph_remote_cache", False)
+     @functorch_config.patch({"enable_autograd_cache": True})
+@@ -411,8 +413,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         def fn(x, y):
+             return torch.matmul(x, y)
+ 
+-        x = torch.randn(4, 4, device="cuda")
+-        y = torch.randn(4, 4, device="cuda")
++        x = torch.randn(4, 4, device=device_type)
++        y = torch.randn(4, 4, device=device_type)
+ 
+         # Clear all caches and counters
+         counters.clear()
+@@ -488,7 +490,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         # Unwrapped version should not
+         self.assertNotIn("inductor_compiled_code", debug_unwrapped.debug_string())
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_flex_attention_with_wrapper_basic(self):
+         """Test that flex_attention works with wrap_inductor_compiled_regions=True"""
+ 
+@@ -504,9 +506,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+             return flex_attention(q, k, v, score_mod=causal_score_mod)
+ 
+         B, H, S, D = 2, 4, 128, 64
+-        q = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
+-        k = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
+-        v = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
++        q = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
++        k = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
++        v = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+ 
+         # Test forward pass
+         output = fn(q, k, v)
+@@ -524,7 +526,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         output_unwrapped = fn_unwrapped(q, k, v)
+         torch.testing.assert_close(output, output_unwrapped, rtol=1e-3, atol=1e-3)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_flex_attention_wrapper_visible_in_debug_mode(self):
+         """Test that inductor_compiled_code HOP is visible to DebugMode when wrapper is enabled"""
+ 
+@@ -548,9 +550,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+             return flex_attention(q, k, v, score_mod=score_mod)
+ 
+         B, H, S, D = 2, 4, 128, 64
+-        q = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
+-        k = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
+-        v = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
++        q = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
++        k = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
++        v = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+ 
+         # Test with wrapper enabled - should see inductor_compiled_code HOP
+         with DebugMode() as debug_wrapped:
+@@ -574,7 +576,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+             "inductor_compiled_code HOP should not be visible when wrapper is disabled",
+         )
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_flex_attention_wrapper_with_backward(self):
+         """Test that wrapper works correctly with backward pass"""
+ 
+@@ -591,13 +593,13 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+ 
+         B, H, S, D = 2, 4, 128, 64
+         q = torch.randn(
+-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
++            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
+         )
+         k = torch.randn(
+-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
++            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
+         )
+         v = torch.randn(
+-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
++            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
+         )
+ 
+         # Forward and backward
+@@ -631,7 +633,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         torch.testing.assert_close(k.grad, k2.grad, rtol=1e-3, atol=1e-3)
+         torch.testing.assert_close(v.grad, v2.grad, rtol=1e-3, atol=1e-3)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     @inductor_config.patch("fx_graph_cache", True)
+     @inductor_config.patch("fx_graph_remote_cache", False)
+     @functorch_config.patch({"enable_autograd_cache": True})
+@@ -654,9 +656,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+             return fn
+ 
+         B, H, S, D = 2, 4, 128, 64
+-        q = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
+-        k = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
+-        v = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
++        q = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
++        k = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
++        v = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+ 
+         # Clear all caches
+         counters.clear()
+@@ -700,7 +702,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         # Verify correctness
+         torch.testing.assert_close(result1, result2)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_flex_attention_with_sac_must_save(self):
+         """
+         Test that SAC policy MUST_SAVE for flex_attention_hop
+@@ -737,13 +739,13 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+ 
+         B, H, S, D = 2, 4, 128, 64
+         q = torch.randn(
+-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
++            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
+         )
+         k = torch.randn(
+-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
++            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
+         )
+         v = torch.randn(
+-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
++            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
+         )
+ 
+         # Forward compiler: should see flex_attention_hop once
+@@ -784,7 +786,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         self.assertIsNotNone(k.grad)
+         self.assertIsNotNone(v.grad)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_flex_attention_with_sac_prefer_recompute(self):
+         """
+         Test that SAC policy PREFER_RECOMPUTE for flex_attention_hop
+@@ -822,13 +824,13 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+ 
+         B, H, S, D = 2, 4, 128, 64
+         q = torch.randn(
+-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
++            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
+         )
+         k = torch.randn(
+-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
++            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
+         )
+         v = torch.randn(
+-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
++            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
+         )
+ 
+         # Forward compiler: should see flex_attention_hop once
+@@ -869,7 +871,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         self.assertIsNotNone(k.grad)
+         self.assertIsNotNone(v.grad)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_sac_outer_compile_inner_basic(self):
+         """
+         Test SAC(compile(foo)) pattern - SAC on eager code with inner compiled region.
+@@ -907,8 +909,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+             b = torch.relu(a)
+             return b
+ 
+-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
++        x = torch.randn(4, 4, device=device_type, requires_grad=True)
++        y = torch.randn(4, 4, device=device_type, requires_grad=True)
+ 
+         # Clone for comparison
+         x_eager = x.detach().clone().requires_grad_(True)
+@@ -949,7 +951,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         self.assertEqual(x.grad, x_eager.grad)
+         self.assertEqual(y.grad, y_eager.grad)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_sac_outer_compile_inner_name_visible_to_policy(self):
+         """Test that SAC policies can inspect torch.compile region names"""
+ 
+@@ -975,8 +977,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+             a = inner_compiled_matmul(x, y)
+             return torch.relu(a)
+ 
+-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
++        x = torch.randn(4, 4, device=device_type, requires_grad=True)
++        y = torch.randn(4, 4, device=device_type, requires_grad=True)
+ 
+         x_eager = x.detach().clone().requires_grad_(True)
+         y_eager = y.detach().clone().requires_grad_(True)
+@@ -1003,7 +1005,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+         self.assertEqual(x.grad, x_eager.grad)
+         self.assertEqual(y.grad, y_eager.grad)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_wrap_no_dispatch_mode_no_hop_invoked(self):
+         """
+         Test that without TorchDispatchMode, the HOP is NOT invoked.
+@@ -1030,8 +1032,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+             def fn(x, y):
+                 return torch.matmul(x, y)
+ 
+-            x = torch.randn(4, 4, device="cuda")
+-            y = torch.randn(4, 4, device="cuda")
++            x = torch.randn(4, 4, device=device_type)
++            y = torch.randn(4, 4, device=device_type)
+             expected = torch.matmul(x, y)
+ 
+             result_without = fn(x, y)
+@@ -1055,8 +1057,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+             def fn2(x, y):
+                 return torch.matmul(x, y)
+ 
+-            x2 = torch.randn(4, 4, device="cuda")
+-            y2 = torch.randn(4, 4, device="cuda")
++            x2 = torch.randn(4, 4, device=device_type)
++            y2 = torch.randn(4, 4, device=device_type)
+             expected2 = torch.matmul(x2, y2)
+ 
+             with DebugMode():
+@@ -1066,7 +1068,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+             mock_hop.assert_called()
+             self.assertEqual(result_with, expected2)
+ 
+-    @requires_cuda_and_triton
++    @requires_accelerator_and_triton
+     def test_sac_outer_compile_inner_flex_attention(self):
+         """
+         Test SAC(compile(foo)) with flex_attention - the key motivating use case.
+@@ -1101,13 +1103,13 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
+ 
+         B, H, S, D = 2, 4, 128, 64
+         q = torch.randn(
+-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
++            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
+         )
+         k = torch.randn(
+-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
++            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
+         )
+         v = torch.randn(
+-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
++            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
+         )
+ 
+         # Enable wrapping at the inductor config level so that flex_attention's
+diff --git a/torch/testing/_internal/triton_utils.py b/torch/testing/_internal/triton_utils.py
+index 9961330e57b..9978b5bd529 100644
+--- a/torch/testing/_internal/triton_utils.py
++++ b/torch/testing/_internal/triton_utils.py
+@@ -21,6 +21,13 @@ requires_gpu_and_triton = unittest.skipUnless(
+ )
+ requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
+ 
++from torch.testing._internal.common_utils import TEST_PRIVATEUSE1
++from torch.utils._triton import has_triton as _has_triton
++HAS_ACCELERATOR_AND_TRITON = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON or (TEST_PRIVATEUSE1 and _has_triton())
++requires_accelerator_and_triton = unittest.skipUnless(
++    HAS_ACCELERATOR_AND_TRITON, "requires accelerator and triton"
++)
++
+ if has_triton():
+     import triton
+     from triton import language as tl
+-- 
+2.39.5 (Apple Git-154)
+

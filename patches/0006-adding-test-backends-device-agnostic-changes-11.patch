@@ -1,0 +1,58 @@
+From a4f2e4a7618439b7744d8c7cbad26be7b069f465 Mon Sep 17 00:00:00 2001
+From: aws-kingrj <78175353+aws-kingrj@users.noreply.github.com>
+Date: Mon, 23 Mar 2026 11:49:18 -0700
+Subject: [PATCH 06/24] adding test backends device agnostic changes (#11)
+
+Co-authored-by: Ryan King <kingrj@6amazon.com>
+---
+ test/distributed/test_backends.py | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/test/distributed/test_backends.py b/test/distributed/test_backends.py
+index 244a5197faf..f114abfc881 100644
+--- a/test/distributed/test_backends.py
++++ b/test/distributed/test_backends.py
+@@ -1,11 +1,18 @@
+ # Owner(s): ["oncall: distributed"]
+ 
+ import os
+-
++import torch
+ import torch.distributed as dist
+ from torch.testing._internal.common_device_type import instantiate_device_type_tests
+ from torch.testing._internal.common_utils import run_tests, TestCase
+ 
++device_type = (
++    acc.type
++    if (acc := torch.accelerator.current_accelerator(check_available=True))
++    else "cpu"
++)
++BACKEND = dist.get_default_backend_for_device(device_type)
++
+ 
+ """
+ common backend API tests
+@@ -32,6 +39,11 @@ class TestMiscCollectiveUtils(TestCase):
+                 raise AssertionError(
+                     f"Expected hccl, got {dist.get_default_backend_for_device(device)}"
+                 )
++        elif device_type in device:
++            if dist.get_default_backend_for_device(device) != BACKEND:
++                raise AssertionError(
++                    f"Expected {BACKEND}, got {dist.get_default_backend_for_device(device)}"
++                )
+         else:
+             with self.assertRaises(ValueError):
+                 dist.get_default_backend_for_device(device)
+@@ -54,7 +66,7 @@ class TestMiscCollectiveUtils(TestCase):
+         dist.destroy_process_group()
+ 
+ 
+-devices = ["cpu", "cuda", "hpu"]
++devices = ["cpu", "cuda", "hpu", device_type]
+ instantiate_device_type_tests(TestMiscCollectiveUtils, globals(), only_for=devices)
+ 
+ if __name__ == "__main__":
+-- 
+2.39.5 (Apple Git-154)
+

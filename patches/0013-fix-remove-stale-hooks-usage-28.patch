@@ -1,0 +1,27 @@
+From d10377e0a729d3df8f3513313b8f6e229814ff9d Mon Sep 17 00:00:00 2001
+From: aws-abigailfernandes <abigailferns94@gmail.com>
+Date: Tue, 7 Apr 2026 13:24:41 -0700
+Subject: [PATCH 13/24] fix: remove stale hooks usage (#28)
+
+Co-authored-by: Abigail Fernandes <ferabiga@amazon.com>
+---
+ torch/testing/_internal/common_distributed.py | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/torch/testing/_internal/common_distributed.py b/torch/testing/_internal/common_distributed.py
+index b54f560e6cd..89878e4b071 100644
+--- a/torch/testing/_internal/common_distributed.py
++++ b/torch/testing/_internal/common_distributed.py
+@@ -2065,9 +2065,6 @@ class MultiProcContinuousTest(TestCase):
+         # Ensure processes are spawned (lazy initialization for instantiate_device_type_tests)
+         self.__class__._ensure_processes_spawned()
+ 
+-        for hook in _test_env_setup_hooks:
+-            hook(world_size=self.world_size)
+-
+         # I am the dispatcher
+         self.rank = self.MAIN_PROCESS_RANK
+ 
+-- 
+2.39.5 (Apple Git-154)
+

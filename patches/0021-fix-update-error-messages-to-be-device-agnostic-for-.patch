@@ -1,0 +1,140 @@
+From 934e46b91d0d4a07dde55d2f7e8a67006aa3c8b7 Mon Sep 17 00:00:00 2001
+From: aws-abigailfernandes <abigailferns94@gmail.com>
+Date: Mon, 20 Apr 2026 14:32:05 -0700
+Subject: [PATCH 21/24] fix: update error messages to be device agnostic for
+ fsdp v1 (#35)
+
+---
+ .../_composable/test_replicate_with_fsdp.py          |  2 +-
+ test/distributed/fsdp/test_fsdp_misc.py              |  7 ++++---
+ test/distributed/test_c10d_common.py                 | 12 +++++-------
+ test/distributed/test_functional_differentials.py    |  3 ++-
+ torch/testing/_internal/distributed/fake_pg.py       |  8 +++++++-
+ 5 files changed, 19 insertions(+), 13 deletions(-)
+
+diff --git a/test/distributed/_composable/test_replicate_with_fsdp.py b/test/distributed/_composable/test_replicate_with_fsdp.py
+index f76251165e1..288ee806c90 100644
+--- a/test/distributed/_composable/test_replicate_with_fsdp.py
++++ b/test/distributed/_composable/test_replicate_with_fsdp.py
+@@ -48,7 +48,7 @@ class ReplicateTest(MultiProcContinuousTest):
+ 
+     @classmethod
+     def backend_str(cls) -> str:
+-        return "nccl"
++        return dist.Backend.default_device_backend_map.get(DEVICE_TYPE, "nccl")
+ 
+     @classmethod
+     def device_type(cls) -> str:
+diff --git a/test/distributed/fsdp/test_fsdp_misc.py b/test/distributed/fsdp/test_fsdp_misc.py
+index 747280155f6..dd46e9feb9f 100644
+--- a/test/distributed/fsdp/test_fsdp_misc.py
++++ b/test/distributed/fsdp/test_fsdp_misc.py
+@@ -33,6 +33,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
+ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+ from torch.testing._internal.common_fsdp import (
+     _assert_module_states,
++    DEVICE_TYPE,
+     DEVICEInitMode,
+     FSDPInitMode,
+     FSDPTestContinuous,
+@@ -903,7 +904,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
+         context = (
+             (
+                 self.assertRaisesRegex(
+-                    ValueError, f"Inconsistent.*cuda:{self.rank} vs cuda:0"
++                    ValueError, f"Inconsistent.*{DEVICE_TYPE}:{self.rank} vs {DEVICE_TYPE}:0"
+                 )
+             )
+             if self.rank != 0
+@@ -1083,7 +1084,7 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
+         with self.assertRaisesRegex(
+             RuntimeError,
+             "An FSDP-managed module unexpectedly has parameters on cpu. Make "
+-            "sure to move the module to cuda:0 before training.",
++            f"sure to move the module to {DEVICE_TYPE}:0 before training.",
+         ):
+             fsdp_model(inp)
+ 
+@@ -1095,7 +1096,7 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
+         with self.assertRaisesRegex(
+             RuntimeError,
+             "An FSDP-managed module with parameter CPU offloading enabled has "
+-            "parameters on cuda:0. Make sure to not move the module from CPU "
++            f"parameters on {DEVICE_TYPE}:0. Make sure to not move the module from CPU "
+             "when offloading parameters.",
+         ):
+             fsdp_model(inp)
+diff --git a/test/distributed/test_c10d_common.py b/test/distributed/test_c10d_common.py
+index cae57f0f889..7d22f4a6c93 100644
+--- a/test/distributed/test_c10d_common.py
++++ b/test/distributed/test_c10d_common.py
+@@ -2083,13 +2083,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
+             elif backend == dist.Backend.XCCL:
+                 if not dist.is_xccl_available():
+                     continue
+-            elif backend == dist.Backend.PRIVATEUSE1:
+-                if not dist.is_backend_available(str(backend)):
+-                    continue
+-            # Multi-threaded PG is defined as a pure python class.
+-            # Its pg.name() does not going through Pybind, so its backend name
+-            # is still "threaded" instead of "custom".
+-            elif backend != "threaded":
++            elif backend == "threaded":
++                pass
++            elif not dist.is_backend_available(str(backend)):
++                continue
++            else:
+                 excepted_backend = "custom"
+ 
+             store = dist.FileStore(self.file_name, self.world_size)
+diff --git a/test/distributed/test_functional_differentials.py b/test/distributed/test_functional_differentials.py
+index 504fce48ea7..98d4f985aed 100644
+--- a/test/distributed/test_functional_differentials.py
++++ b/test/distributed/test_functional_differentials.py
+@@ -28,6 +28,7 @@ if not dist.is_available():
+ DEVICE = "cuda"
+ devices = ["cpu"]
+ if acc := torch.accelerator.current_accelerator(True):
++    DEVICE = acc.type
+     devices += [acc.type]
+ 
+ 
+@@ -38,7 +39,7 @@ def with_comms(func=None):
+     @wraps(func)
+     def wrapper(self, *args, **kwargs):
+         if (
+-            torch.cuda.is_available()
++            torch.accelerator.is_available()
+             and torch.accelerator.device_count() < self.world_size
+         ):
+             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+diff --git a/torch/testing/_internal/distributed/fake_pg.py b/torch/testing/_internal/distributed/fake_pg.py
+index af1917eeb0f..c45d4a8d834 100644
+--- a/torch/testing/_internal/distributed/fake_pg.py
++++ b/torch/testing/_internal/distributed/fake_pg.py
+@@ -1,5 +1,6 @@
+ # mypy: allow-untyped-defs
+ 
++import torch
+ import torch.distributed as dist
+ from torch._C._distributed_c10d import FakeProcessGroup
+ 
+@@ -27,9 +28,14 @@ def _create_fake_pg(common_opts, backend_opts):
+     )
+ 
+ 
++_fake_pg_devices = ["cpu", "cuda", "hpu", "xpu"]
++_pu1_backend = torch._C._get_privateuse1_backend_name()
++if _pu1_backend != "privateuseone":
++    _fake_pg_devices.append(_pu1_backend)
++
+ dist.Backend.register_backend(
+     dist.Backend.FAKE,
+     _create_fake_pg,
+     extended_api=True,
+-    devices=["cpu", "cuda", "hpu", "xpu"],
++    devices=_fake_pg_devices,
+ )
+-- 
+2.39.5 (Apple Git-154)
+
