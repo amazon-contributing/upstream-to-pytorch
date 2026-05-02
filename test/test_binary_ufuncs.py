@@ -1423,8 +1423,8 @@ class TestBinaryUfuncs(TestCase):
             will_raise_error = (
                 dtype is torch.half and torch.device(device).type == "cpu"
             )
-            # Some backends declare complex dtypes as unsupported (e.g. MPS,
-            # AWS Neuron). Skip the complex-exponent branch on those backends;
+            # Some backends declare complex dtypes as unsupported (e.g. MPS).
+            # Skip the complex-exponent branch on those backends;
             # coverage for real exponents above is preserved.
             from torch.testing._internal.common_dtype import (
                 get_unsupported_dtypes_for_device,

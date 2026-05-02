@@ -218,8 +218,8 @@ class TestForeach(TestCase):
             _, _, func, ref = self._get_funcs(op)
         else:
             func, ref, _, _ = self._get_funcs(op)
-        # Some backends declare complex dtypes as unsupported (e.g. MPS, AWS
-        # Neuron). When allow_higher_dtype_scalars is True, ops like
+        # Some backends declare complex dtypes as unsupported (e.g. MPS,).
+        # When allow_higher_dtype_scalars is True, ops like
         # _foreach_pow will promote non-complex inputs to complex output via
         # type promotion and fail on those backends. Disable it there; other
         # backends keep the default behaviour.
