@@ -493,7 +493,7 @@ class TestProfiler(TestCase):
         self.assertEqual(len(observed_during_run), worker_threads)
         self.assertEqual(len(observed_during_run), len(set(observed_during_run)))
 
-    def payload(self, use_cuda=False):
+    def payload(self, use_cuda=False, tensor_size=10):
         x = torch.randn(10, 10)
         if use_cuda:
             x = x.to(device_type)
