@@ -12,6 +12,16 @@ import os
 import unittest
 
 
+# Neuron runs the upstream attention/CP tests through the PrivateUse1
+# dispatcher. The PLATFORM_SUPPORTS_* LazyVals below only recognise
+# CUDA/ROCm/XPU, so without this they short-circuit to a CUDA-only skip --
+# including inside the spawn-ed subprocesses of multiprocess DTensor tests,
+# where a main-process-only override does not run. Gating on the inherited
+# PYTORCH_TESTING_DEVICE_ONLY_FOR env var makes the flags correct in both the
+# controller and the subprocesses.
+TEST_NEURON = os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR") == "neuron"
+
+
 CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
 
 
@@ -70,6 +80,8 @@ def CDNA2OrLater():
     return evaluate_gfx_arch_within(["gfx90a", "gfx942"])
 
 def evaluate_platform_supports_flash_attention():
+    if TEST_NEURON:
+        return True
     if TEST_WITH_ROCM:
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
