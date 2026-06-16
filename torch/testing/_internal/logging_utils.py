@@ -173,10 +173,11 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
         # handlers must not count against torch's own handler budget.
         for log_qname in torch._logging._internal.log_registry.get_log_qnames():
             logger = logging.getLogger(log_qname)
+            # Exclude pytest's capture handlers — they aren't torch-internal leaks.
             torch_handlers = [
                 h
                 for h in logger.handlers
-                if torch._logging._internal._is_torch_handler(h)
+                if type(h).__name__ not in ("LogCaptureHandler", "_LiveLoggingStreamHandler")
             ]
             num_handlers = len(torch_handlers)
             self.assertLessEqual(
