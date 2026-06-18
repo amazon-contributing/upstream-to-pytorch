@@ -181,7 +181,9 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
 
             self.assertGreater(num_handlers, 0, "All pt2 loggers should have more than zero handlers")
 
-            for handler in logger.handlers:
+            # Wrap only torch's handlers — wrapping pytest's would capture each
+            # record more than once, duplicating entries in record_list.
+            for handler in torch_handlers:
                 old_emit = handler.emit
 
                 def new_emit(record):
