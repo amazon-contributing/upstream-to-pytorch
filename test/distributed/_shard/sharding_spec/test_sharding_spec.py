@@ -1,8 +1,11 @@
+# Adapted from upstream — made device-agnostic for PrivateUse1 backends.
 # Owner(s): ["oncall: distributed"]
 import copy
+import sys
 from dataclasses import dataclass
 
 import torch
+import torch.distributed as dist
 from torch.distributed._shard import _shard_tensor, sharded_tensor
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
@@ -25,7 +28,10 @@ from torch.distributed._shard.sharding_spec._internals import (
     validate_non_overlapping_shards_metadata,
 )
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
@@ -39,7 +45,16 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common i
     _chunk_sharding_specs_list_for_test,
 )
 
+if torch.accelerator.current_accelerator() is None:
+    print("No accelerator available, skipping tests", file=sys.stderr)
+    sys.exit(0)
 
+DEVICE_TYPE = torch.accelerator.current_accelerator().type
+BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
+
+
+# NOTE: TestShardingSpec tests the API parser itself with hardcoded "cuda:0" strings.
+# Those are kept as-is since they're testing the parser, not running distributed tests.
 class TestShardingSpec(TestCase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "2 CUDA GPUs are needed")
     def test_device_placement(self):
@@ -614,10 +629,10 @@ class GridShardingSpec(ShardingSpec):
 class TestCustomShardingSpec(ShardedTensorTestBase):
     def test_custom_sharding_spec(self):
         ranks = [
-            "rank:0/cuda:0",
-            "rank:1/cuda:1",
-            "rank:2/cuda:2",
-            "rank:3/cuda:3",
+            f"rank:0/{DEVICE_TYPE}:0",
+            f"rank:1/{DEVICE_TYPE}:1",
+            f"rank:2/{DEVICE_TYPE}:2",
+            f"rank:3/{DEVICE_TYPE}:3",
         ]
 
         grid_spec = GridShardingSpec(grid_size=4, placements=ranks)
@@ -635,17 +650,17 @@ class TestCustomShardingSpec(ShardedTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_custom_sharding_spec_tensor_ctor(self):
         """Test sharded_tensor.ones(...) with the custom
         grid sharding spec.
         """
 
         ranks = [
-            "rank:0/cuda:0",
-            "rank:1/cuda:1",
-            "rank:2/cuda:2",
-            "rank:3/cuda:3",
+            f"rank:0/{DEVICE_TYPE}:0",
+            f"rank:1/{DEVICE_TYPE}:1",
+            f"rank:2/{DEVICE_TYPE}:2",
+            f"rank:3/{DEVICE_TYPE}:3",
         ]
 
         grid_spec = GridShardingSpec(grid_size=2, placements=ranks)
@@ -656,23 +671,23 @@ class TestCustomShardingSpec(ShardedTensorTestBase):
         local_shards = st.local_shards()
         self.assertEqual(1, len(local_shards))
         local_shard = local_shards[0].tensor
-        self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+        self.assertEqual(torch.device(DEVICE_TYPE, self.rank), local_shard.device)
         self.assertEqual((2, 2), local_shard.size())
         self.assertEqual(local_shard, torch.ones(2, 2))
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_custom_sharding_spec_shard_tensor(self):
         """Test custom spec can be invoked from the
         _shard_tensor callsite.
         """
 
         ranks = [
-            "rank:0/cuda:0",
-            "rank:1/cuda:1",
-            "rank:2/cuda:2",
-            "rank:3/cuda:3",
+            f"rank:0/{DEVICE_TYPE}:0",
+            f"rank:1/{DEVICE_TYPE}:1",
+            f"rank:2/{DEVICE_TYPE}:2",
+            f"rank:3/{DEVICE_TYPE}:3",
         ]
 
         grid_spec = GridShardingSpec(grid_size=2, placements=ranks)

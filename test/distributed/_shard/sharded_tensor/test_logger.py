@@ -1,3 +1,4 @@
+# Adapted from upstream — made device-agnostic for PrivateUse1 backends.
 # Owner(s): ["oncall: distributed"]
 
 import logging

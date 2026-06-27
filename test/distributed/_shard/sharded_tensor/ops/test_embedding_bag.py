@@ -1,3 +1,4 @@
+# Adapted from upstream — made device-agnostic for PrivateUse1 backends.
 # Owner(s): ["oncall: distributed"]
 
 import sys
@@ -5,7 +6,10 @@ import sys
 import torch
 import torch.distributed as dist
 from torch.distributed._shard import shard_parameter
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -25,6 +29,13 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+if torch.accelerator.current_accelerator() is None:
+    print("No accelerator available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
+DEVICE_TYPE = torch.accelerator.current_accelerator().type
+BACKEND = dist.get_default_backend_for_device(DEVICE_TYPE)
 
 
 class TestShardedEmbeddingBag(ShardedTensorTestBase):
@@ -51,7 +62,7 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
             norm_type=norm_type,
             include_last_offset=include_last_offset,
             padding_idx=padding_idx,
-        ).cuda(self.rank)
+        ).to(torch.device(DEVICE_TYPE, self.rank))
 
         sharded_embedding_bag = torch.nn.EmbeddingBag(
             num_embeddings,
@@ -73,10 +84,10 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
 
         # Run sharded computation
         torch.manual_seed(self.rank)  # inputs different on each rank
-        inp = torch.randint(0, num_embeddings, tuple(input_size)).cuda(self.rank)
+        inp = torch.randint(0, num_embeddings, tuple(input_size)).to(torch.device(DEVICE_TYPE, self.rank))
         per_sample_weights = None
         if mode == "sum":
-            per_sample_weights = torch.rand(*input_size).cuda(self.rank)
+            per_sample_weights = torch.rand(*input_size).to(torch.device(DEVICE_TYPE, self.rank))
 
         offsets = None
         if len(input_size) == 1:
@@ -91,7 +102,7 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
                 if include_last_offset:
                     offsets[-1] = input_size[0]
                 offsets = (
-                    torch.unique(offsets, sorted=True).contiguous().cuda(self.rank)
+                    torch.unique(offsets, sorted=True).contiguous().to(torch.device(DEVICE_TYPE, self.rank))
                 )
 
         # If max_norm is set, we need to ensure that the renorm has been applied across
@@ -100,7 +111,7 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
             gathered_inputs = [torch.zeros_like(inp) for _ in range(TEST_GPU_NUM)]
             dist.all_gather(gathered_inputs, inp)
             unique_inp = torch.unique(torch.cat(gathered_inputs))
-            offsets_dummy = torch.tensor([len(unique_inp) // 2]).cuda(self.rank)
+            offsets_dummy = torch.tensor([len(unique_inp) // 2]).to(torch.device(DEVICE_TYPE, self.rank))
             local_embedding_bag(unique_inp, offsets=offsets_dummy)
 
         sharded_output = sharded_embedding_bag(
@@ -158,16 +169,16 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
 
         self.assertEqual(local_output, sharded_output)
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_sharded_embedding_bag_colwise(self):
         for spec in generate_chunk_sharding_specs_for_test(1):
             self._test_sharded_embedding_bag_with_test_cases(spec, 1)
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=BACKEND)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_sharded_embedding_bag_rowwise(self):
         for spec in generate_chunk_sharding_specs_for_test(0):
             self._test_sharded_embedding_bag_with_test_cases(spec, 0)
