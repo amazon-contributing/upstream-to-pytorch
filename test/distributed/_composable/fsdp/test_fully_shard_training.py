@@ -143,7 +143,7 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         model(x, ys)
 
     def test_root_no_forward_inputs(self):
-        device = torch.device(device_type.type, 0)
+        device = torch.device(device_type.type, self.rank)
 
         class ParameterOnlyModule(nn.Module):
             def __init__(self):
