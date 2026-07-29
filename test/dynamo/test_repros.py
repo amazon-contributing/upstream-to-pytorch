@@ -1309,7 +1309,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     # https://github.com/pytorch/pytorch/issues/90552
     def test_intermediate_leaf_requires_grad(self):
         def f(x):
-            leaf = torch.ones(2, requires_grad=True)
+            leaf = torch.ones(2, device=device_type, requires_grad=True)
             return leaf, leaf * 2
 
         f_compiled = torch.compile(f, backend="aot_eager")
