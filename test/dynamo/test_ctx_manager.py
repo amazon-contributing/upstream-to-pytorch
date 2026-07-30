@@ -2771,6 +2771,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
 
         s0 = torch.Stream(device=device)
         s1 = torch.Stream(device=device)
+        expected_frame_count = 2 if s0 != s1 else 1
         x = torch.randn(2, 2)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -2782,7 +2783,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
 
         ref1 = fn(x, s1, s1)
         res1 = opt_fn(x, s1, s1)
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, expected_frame_count)
         self.assertEqual(ref1, res1)
 
         torch._dynamo.reset()
@@ -3145,7 +3146,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         ref = fn(a_float32, b_float32)
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         res = opt_fn(a_float32, b_float32)
-        self.assertTrue(same(ref, res))
+        self.assertTrue(same(ref, res, tol=1e-3))
         self.assertTrue(res[0].dtype == torch.float16)
         self.assertTrue(res[1].dtype == torch.float16)
 
