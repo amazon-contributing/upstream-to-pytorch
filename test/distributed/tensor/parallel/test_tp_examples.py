@@ -55,6 +55,11 @@ reduce_scatter, all_gather, all_reduce = (
     c10d_functional.all_reduce,
 )
 
+# Local and class-sharded cross entropy use different float32 reduction
+# trees. Keep the tolerance tight while allowing the resulting roundoff.
+LOSS_PARALLEL_RTOL = 1.1e-5
+LOSS_PARALLEL_ATOL = 1e-5
+
 
 class ExpCommCounts(NamedTuple):
     fwd: dict | None = None
@@ -594,7 +599,12 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             # Loss should be Partial("sum") on dp dim, Replicate on tp dim
             self.assertEqual(dist_y.placements[0], Partial("sum"))
             self.assertTrue(dist_y.placements[1].is_replicate())
-            self.assertEqual(dist_y.full_tensor(), y_sum)
+            self.assertEqual(
+                dist_y.full_tensor(),
+                y_sum,
+                rtol=LOSS_PARALLEL_RTOL,
+                atol=LOSS_PARALLEL_ATOL,
+            )
 
             dist_y.sum().backward()
             y_sum.sum().backward()
@@ -608,7 +618,12 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             dist_y_none = F.cross_entropy(dist_x_none, dist_target, reduction="none")
             self.assertTrue(dist_y_none.placements[0].is_shard(0))
             self.assertTrue(dist_y_none.placements[1].is_replicate())
-            self.assertEqual(dist_y_none.full_tensor(), y_none)
+            self.assertEqual(
+                dist_y_none.full_tensor(),
+                y_none,
+                rtol=LOSS_PARALLEL_RTOL,
+                atol=LOSS_PARALLEL_ATOL,
+            )
 
             # Force grad_output to arrive at the backward handler with placements
             # that do NOT match the forward output (Replicate on dp vs.
@@ -642,7 +657,12 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             )
             self.assertTrue(dist_y_none_w.placements[0].is_shard(0))
             self.assertTrue(dist_y_none_w.placements[1].is_replicate())
-            self.assertEqual(dist_y_none_w.full_tensor(), y_none_w)
+            self.assertEqual(
+                dist_y_none_w.full_tensor(),
+                y_none_w,
+                rtol=LOSS_PARALLEL_RTOL,
+                atol=LOSS_PARALLEL_ATOL,
+            )
 
             grad_out_w = distribute_tensor(
                 torch.ones_like(y_none_w), mesh_2d, [Replicate(), Replicate()]
@@ -663,7 +683,12 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             dist_y_w = F.cross_entropy(dist_x_w, dist_target, weight, reduction="sum")
             self.assertEqual(dist_y_w.placements[0], Partial("sum"))
             self.assertTrue(dist_y_w.placements[1].is_replicate())
-            self.assertEqual(dist_y_w.full_tensor(), y_weighted)
+            self.assertEqual(
+                dist_y_w.full_tensor(),
+                y_weighted,
+                rtol=LOSS_PARALLEL_RTOL,
+                atol=LOSS_PARALLEL_ATOL,
+            )
 
             dist_y_w.sum().backward()
             y_weighted.sum().backward()
@@ -699,7 +724,12 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             dist_y = F.cross_entropy(dist_x, dist_target, reduction="sum")
             self.assertTrue(dist_y.placements[0].is_replicate())
             self.assertTrue(dist_y.placements[1].is_replicate())
-            self.assertEqual(dist_y.full_tensor(), y_sum)
+            self.assertEqual(
+                dist_y.full_tensor(),
+                y_sum,
+                rtol=LOSS_PARALLEL_RTOL,
+                atol=LOSS_PARALLEL_ATOL,
+            )
 
             dist_y.backward()
             y_sum.backward()
@@ -713,7 +743,12 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             dist_y_none = F.cross_entropy(dist_x, dist_target, reduction="none")
             self.assertTrue(dist_y_none.placements[0].is_replicate())
             self.assertTrue(dist_y_none.placements[1].is_replicate())
-            self.assertEqual(dist_y_none.full_tensor(), y_none)
+            self.assertEqual(
+                dist_y_none.full_tensor(),
+                y_none,
+                rtol=LOSS_PARALLEL_RTOL,
+                atol=LOSS_PARALLEL_ATOL,
+            )
 
             dist_y_none.sum().backward()
             y_none.sum().backward()
@@ -745,7 +780,12 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             # TP is at dim 0 -> Replicate; DP at dim 1 -> Partial("sum")
             self.assertTrue(dist_y.placements[0].is_replicate())
             self.assertEqual(dist_y.placements[1], Partial("sum"))
-            self.assertEqual(dist_y.full_tensor(), y_sum)
+            self.assertEqual(
+                dist_y.full_tensor(),
+                y_sum,
+                rtol=LOSS_PARALLEL_RTOL,
+                atol=LOSS_PARALLEL_ATOL,
+            )
 
             dist_y.sum().backward()
             y_sum.sum().backward()

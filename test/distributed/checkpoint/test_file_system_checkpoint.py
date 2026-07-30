@@ -487,6 +487,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     "sharded": sharded_tensor.rand(save_spec, tensor_size),
                     "replicated": torch.rand(tensor_size, device=self.rank),
                 }
+                dist.broadcast(save_dict["replicated"], src=0)
 
                 fs_writer = FileSystemWriter(path=path)
                 save_state_dict(state_dict=save_dict, storage_writer=fs_writer)

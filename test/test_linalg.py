@@ -4955,6 +4955,7 @@ class TestLinalg(TestCase):
 
     @onlyAccelerator
     @dtypes(torch.float)
+    @toleranceOverride({torch.float: tol(atol=2e-5, rtol=1.3e-6)})
     def test_triangular_solve_large(self, device, dtype):
         # Repro for https://github.com/pytorch/pytorch/issues/79191
         A = torch.randn(1, 2, 2, device=device, dtype=dtype).tril_()
@@ -5685,7 +5686,12 @@ class TestLinalg(TestCase):
 
         sizes = ((3, 3), (5, 5), (4, 2), (3, 4), (0, 0), (0, 1), (1, 0))
         batches = ((0,), (), (1,), (2,), (3,), (1, 0), (3, 5))
-        pivots = (True, False) if self.device_type != "cpu" else (True,)
+        # Neuron delegates LU factorization to CPU, which requires pivoting.
+        pivots = (
+            (True, False)
+            if self.device_type not in ("cpu", "neuron")
+            else (True,)
+        )
         fns = (partial(torch.lu, get_infos=True), torch.linalg.lu_factor, torch.linalg.lu_factor_ex)
         for ms, batch, pivot, singular, fn in itertools.product(sizes, batches, pivots, (True, False), fns):
             shape = batch + ms

@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocmArch,
     skipIfRocmVersionLessThan,
     TEST_HPU,
+    TEST_PRIVATEUSE1,
 )
 from torch.utils.checkpoint import checkpoint
 
@@ -611,33 +612,43 @@ class TestFullyShardMixedPrecisionJVP(FSDPTest):
                 reshard_after_forward=False,
             )
 
-        gen = torch.Generator(device_type.type)
+        # PrivateUse1 backends may expose a device generator before implementing
+        # explicit-generator random factory kernels. Seed their default generator
+        # so this FSDP/JVP test does not depend on that separate RNG capability.
+        gen = None if TEST_PRIVATEUSE1 else torch.Generator(device_type.type)
+
+        def seed_generator(seed: int) -> torch.Generator | None:
+            if gen is None:
+                torch.manual_seed(seed)
+                return None
+            return gen.manual_seed(seed)
+
         for idx, module in enumerate((enc, dec)):
             module.to_empty(device=device_type.type)
             with torch.no_grad():
                 module.weight.normal_(
                     std=module.in_features**-0.5,
-                    generator=gen.manual_seed(42 + idx),
+                    generator=seed_generator(42 + idx),
                 )
 
         x = torch.randn(
             (128,),
             device=device_type.type,
             dtype=dtype,
-            generator=gen.manual_seed(0),
+            generator=seed_generator(0),
         )
         primal = torch.randn(
             (320,),
             device=device_type.type,
             dtype=dtype,
-            generator=gen.manual_seed(1),
+            generator=seed_generator(1),
             requires_grad=True,
         )
         tangent = torch.randn(
             (320,),
             device=device_type.type,
             dtype=dtype,
-            generator=gen.manual_seed(2),
+            generator=seed_generator(2),
         )
         e = enc(x)
 
