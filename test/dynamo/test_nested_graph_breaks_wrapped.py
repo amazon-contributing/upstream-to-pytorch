@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import functools
 import unittest
 
 import torch
@@ -143,13 +144,30 @@ xfails = [
     NestedGraphBreaksDecoratorTests.test_torch_guards_stack_frame_register_inlining_disable_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksSubGraphTests.test_resume_paths_join_nested_graph_breaks,  # noqa: F821
     NestedGraphBreaksReproTests.test_udf_classes_reconstruction_nested_graph_breaks,  # noqa: F821
-    NestedGraphBreaksUnspecTests.test_unspecialized_float_multiply_precision,  # noqa: F821
 ]
 
 case = None
 
 for case in xfails:
     unittest.expectedFailure(case)
+
+
+def _mark_inherited_test_expected_failure(test_cls, test_name):
+    inherited_test = getattr(test_cls, test_name)
+
+    @functools.wraps(inherited_test)
+    def class_local_test(*args, **kwargs):
+        return inherited_test(*args, **kwargs)
+
+    setattr(test_cls, test_name, unittest.expectedFailure(class_local_test))
+
+
+# expectedFailure mutates its argument. Make a class-local copy so marking the
+# inherited nested-graph-break test does not also mark UnspecTests.
+_mark_inherited_test_expected_failure(
+    NestedGraphBreaksUnspecTests,  # noqa: F821
+    "test_unspecialized_float_multiply_precision",
+)
 
 del case, xfails
 
