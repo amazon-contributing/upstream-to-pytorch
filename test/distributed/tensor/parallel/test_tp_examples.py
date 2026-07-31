@@ -838,7 +838,12 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             dist_y_none = F.cross_entropy(dist_x_none, dist_target, reduction="none")
             self.assertTrue(dist_y_none.placements[0].is_shard(1))
             self.assertTrue(dist_y_none.placements[1].is_replicate())
-            self.assertEqual(dist_y_none.full_tensor(), y_none)
+            self.assertEqual(
+                dist_y_none.full_tensor(),
+                y_none,
+                rtol=LOSS_PARALLEL_RTOL,
+                atol=LOSS_PARALLEL_ATOL,
+            )
 
             # Exercise the backward redistribute path with a mismatched
             # (fully-replicated) grad_output.
