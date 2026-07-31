@@ -124,13 +124,15 @@ class GraphModule(torch.nn.Module):
 
     def test_all_gather_tensor_gather_dim_0(self):
         """all_gather_single with gather_dim=0 (no _maybe_view_chunk_cat call)."""
+        backend = EagerAndRecordGraphs()
 
-        @torch.compile(fullgraph=True, backend="eager")
+        @torch.compile(fullgraph=True, backend=backend)
         def fn(x):
             return all_gather_single(x, gather_dim=0, group=dist.group.WORLD)
 
         x = torch.randn(4, 4)
         result = fn(x)
+        self.assertEqual(len(backend.graphs), 1)
         expected = all_gather_single(x, gather_dim=0, group=dist.group.WORLD)
         self.assertEqual(result, expected)
 
@@ -140,13 +142,15 @@ class GraphModule(torch.nn.Module):
         Shape [2, 4] with world_size=2: dim 0 == group_size and no dims between
         0 and gather_dim, so the view optimization applies.
         """
+        backend = EagerAndRecordGraphs()
 
-        @torch.compile(fullgraph=True, backend="eager")
+        @torch.compile(fullgraph=True, backend=backend)
         def fn(x):
             return all_gather_single(x, gather_dim=1, group=dist.group.WORLD)
 
         x = torch.randn(1, 4)
         result = fn(x)
+        self.assertEqual(len(backend.graphs), 1)
         expected = all_gather_single(x, gather_dim=1, group=dist.group.WORLD)
         self.assertEqual(result, expected)
 
@@ -156,13 +160,15 @@ class GraphModule(torch.nn.Module):
         Shape [2, 3, 4] with world_size=2: dims between 0 and gather_dim=2
         include dim 1 with size 3 (not 1), so the chunk+cat fallback is used.
         """
+        backend = EagerAndRecordGraphs()
 
-        @torch.compile(fullgraph=True, backend="eager")
+        @torch.compile(fullgraph=True, backend=backend)
         def fn(x):
             return all_gather_single(x, gather_dim=2, group=dist.group.WORLD)
 
         x = torch.randn(1, 3, 4)
         result = fn(x)
+        self.assertEqual(len(backend.graphs), 1)
         expected = all_gather_single(x, gather_dim=2, group=dist.group.WORLD)
         self.assertEqual(result, expected)
 
