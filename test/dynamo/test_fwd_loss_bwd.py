@@ -5,6 +5,9 @@ import re
 import textwrap
 
 import torch
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 import torch._dynamo
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -46,7 +49,11 @@ class TestForwardLossBackward(TestCase):
 
         self.assertEqual(eager_result, compiled_result)
         for name, p in mod.named_parameters():
-            self.assertEqual(eager_grads[name], p.grad, f"Grad mismatch for {name}")
+            self.assertEqual(
+                eager_grads[name],
+                p.grad,
+                lambda msg: f"{msg}\nGrad mismatch for {name}",
+            )
         self.assertEqual(len(backend.graphs), 1)
 
         gm = backend.graphs[0]
@@ -89,6 +96,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, (l_mod_parameters_weight_, l_mod_parameters_bias_));  l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -124,6 +132,70 @@ class <lambda>(torch.nn.Module):
         return (detach, t_3, view)
 """,
         )
+
+    @skipIfCrossRef
+    def test_autograd_grad_dict_inputs(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            params = dict(mod.named_parameters())
+            grads = torch.autograd.grad(loss, params)
+            return loss.detach(), grads["weight"], grads["bias"]
+
+        backend = EagerAndRecordGraphs()
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        eager_result = fn(x)
+        compiled_result = compiled_fn(x)
+
+        for e, c in zip(eager_result, compiled_result):
+            self.assertEqual(e, c)
+
+    @skipIfCrossRef
+    def test_autograd_grad_dict_inputs_kwargs(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            params = dict(mod.named_parameters())
+            grads = torch.autograd.grad(outputs=loss, inputs=params)
+            return loss.detach(), grads["weight"], grads["bias"]
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        eager_result = fn(x)
+        compiled_result = compiled_fn(x)
+
+        for e, c in zip(eager_result, compiled_result):
+            self.assertEqual(e, c)
+
+    @skipIfCrossRef
+    def test_backward_dict_inputs(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            params = dict(mod.named_parameters())
+            loss.backward(inputs=params)
+            return loss.detach(), mod.weight.grad.clone(), mod.bias.grad.clone()
+
+        # Reset grads between eager and compiled runs
+        eager_result = fn(x)
+        mod.weight.grad = None
+        mod.bias.grad = None
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_result = compiled_fn(x)
+
+        for e, c in zip(eager_result, compiled_result):
+            self.assertEqual(e, c)
 
     @skipIfCrossRef
     def test_autograd_grad_with_kwargs(self):
@@ -227,6 +299,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
+
         getitem: "f32[4, 4]" = grad[0];  grad = None
 
         detach: "f32[]" = loss.detach();  loss = None
@@ -271,8 +344,8 @@ class <lambda>(torch.nn.Module):
             # Return loss - with retain_graph=True, loss can still be backwarded
             return loss, grad_weight
 
-        x = torch.randn(2, 4, requires_grad=True)
-        weight = torch.randn(4, 3, requires_grad=True)
+        x = torch.randn(2, 4, requires_grad=True, device=device_type)
+        weight = torch.randn(4, 3, requires_grad=True, device=device_type)
 
         x_eager = x.clone().detach().requires_grad_(True)
         weight_eager = weight.clone().detach().requires_grad_(True)
@@ -352,9 +425,9 @@ autograd.grad with external grad_fn
 
     @skipIfCrossRef
     def test_autograd_grad_manual_update_matches_eager(self):
-        mod_eager = torch.nn.Linear(4, 4)
+        mod_eager = torch.nn.Linear(4, 4).to(device_type)
         mod_compiled = copy.deepcopy(mod_eager)
-        x = torch.randn(2, 4)
+        x = torch.randn(2, 4, device=device_type)
 
         def step_fn(mod):
             res = mod(x)
@@ -445,6 +518,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, (l_mod_parameters_weight_, l_mod_parameters_bias_), materialize_grads = False, allow_unused = True);  loss = l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
+
         weight_grad: "f32[4, 4]" = grad[0]
         bias_grad: "f32[4]" = grad[1];  grad = None
 
@@ -880,6 +954,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False)
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -923,6 +998,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = True)
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -968,6 +1044,7 @@ class GraphModule(torch.nn.Module):
         gradient: "f32[2, 4]" = torch.ones_like(res)
 
         grad = torch.autograd.grad(res, [l_mod_parameters_weight_, l_mod_parameters_bias_], gradient, allow_unused = False);  gradient = None
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -1015,6 +1092,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = res.sum();  res = None
 
         grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False, retain_graph = True)
+
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
 
@@ -1028,6 +1106,7 @@ class GraphModule(torch.nn.Module):
         _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
 
         grad_1 = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False)
+
         getitem_2: "f32[4, 4]" = grad_1[0]
         getitem_3: "f32[4]" = grad_1[1];  grad_1 = None
 
@@ -1046,6 +1125,31 @@ class GraphModule(torch.nn.Module):
         return (detach, new_grad_strided, new_grad_strided_1)
 """,
         )
+
+    @skipIfCrossRef
+    def test_tensor_backward_preserves_existing_grad_reference(self):
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            loss = mod(x).sum()
+            loss.backward(inputs=[mod.weight])
+            return loss.detach()
+
+        mod.weight.grad = torch.ones_like(mod.weight)
+        saved_grad = mod.weight.grad
+        eager_result = fn(x)
+        eager_grad = mod.weight.grad.clone()
+        self.assertIs(mod.weight.grad, saved_grad)
+
+        mod.weight.grad = torch.ones_like(mod.weight)
+        saved_grad = mod.weight.grad
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_result = compiled_fn(x)
+
+        self.assertEqual(eager_result, compiled_result)
+        self.assertEqual(mod.weight.grad, eager_grad)
+        self.assertIs(mod.weight.grad, saved_grad)
 
     @skipIfCrossRef
     def test_backward_on_no_grad_tensor(self):
@@ -1118,6 +1222,7 @@ class GraphModule(torch.nn.Module):
         loss: "f32[]" = y.sum();  y = None
 
         grad = torch.autograd.grad(loss, [w]);  loss = w = None
+
         grad_1: "f32[4, 4]" = grad[0];  grad = None
         return (grad_1,)
 """,
@@ -1157,8 +1262,8 @@ backward() with in-graph created tensor
         In eager mode, backward([x, x]) doesn't double-accumulate gradients.
         Our dynamo rewrite must match this behavior by deduplicating inputs.
         """
-        mod = torch.nn.Linear(4, 4)
-        x = torch.randn(2, 4)
+        mod = torch.nn.Linear(4, 4).to(device_type)
+        x = torch.randn(2, 4, device=device_type)
 
         def fn(x):
             res = mod(x)

@@ -5,6 +5,10 @@ import itertools
 from unittest import mock
 
 import torch
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
@@ -40,8 +44,8 @@ class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def test_invoke_in_pt2(self):
         for backend in ["eager", "aot_eager", "inductor"]:
             torch._dynamo.reset()
-            x = torch.tensor([0.5, 0.5], requires_grad=True)
-            y = torch.tensor([0.5, 0.5], requires_grad=True)
+            x = torch.tensor([0.5, 0.5], requires_grad=True, device=device_type)
+            y = torch.tensor([0.5, 0.5], requires_grad=True, device=device_type)
 
             def fn(x, y):
                 x.register_hook(_multiply_invoke)
@@ -49,7 +53,7 @@ class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
             fn = torch.compile(fn, backend=backend)
             out = fn(x, y)
-            grad_out = torch.tensor([2.0, 2.0])
+            grad_out = torch.tensor([2.0, 2.0], device=device_type)
             out.backward(grad_out)
             self.assertEqual(x.grad, grad_out * y)
 
@@ -147,13 +151,13 @@ class GraphModule(torch.nn.Module):
         aot1_tangents_1: "f32[2]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
 
         accumulate_grad = torch__dynamo_compiled_autograd_ops_AccumulateGrad([aot1_tangents_1], getitem_1, None, False);  getitem_1 = None
-        getitem_11: "f32[2]" = accumulate_grad[0];  accumulate_grad = None
+        call_accumulate_grad: "f32[2]" = accumulate_grad[0];  accumulate_grad = None
 
         result: "f32[2]" = aot1_tangents_1 * aot1_tangents_1;  aot1_tangents_1 = None
 
         accumulate_grad_1 = torch__dynamo_compiled_autograd_ops_AccumulateGrad([result], getitem_2, None, False);  result = getitem_2 = None
-        getitem_12: "f32[2]" = accumulate_grad_1[0];  accumulate_grad_1 = None
-        return (getitem_11, getitem_12)
+        call_accumulate_grad_1: "f32[2]" = accumulate_grad_1[0];  accumulate_grad_1 = None
+        return (call_accumulate_grad, call_accumulate_grad_1)
 """,
                 )
             elif backend == "inductor":
@@ -178,13 +182,13 @@ class GraphModule(torch.nn.Module):
         aot3_tangents_1: "f32[2]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
 
         accumulate_grad = torch__dynamo_compiled_autograd_ops_AccumulateGrad([aot3_tangents_1], getitem_1, None, False);  getitem_1 = None
-        getitem_11: "f32[2]" = accumulate_grad[0];  accumulate_grad = None
+        call_accumulate_grad: "f32[2]" = accumulate_grad[0];  accumulate_grad = None
 
         result: "f32[2]" = aot3_tangents_1 * aot3_tangents_1;  aot3_tangents_1 = None
 
         accumulate_grad_1 = torch__dynamo_compiled_autograd_ops_AccumulateGrad([result], getitem_2, None, False);  result = getitem_2 = None
-        getitem_12: "f32[2]" = accumulate_grad_1[0];  accumulate_grad_1 = None
-        return (getitem_11, getitem_12)
+        call_accumulate_grad_1: "f32[2]" = accumulate_grad_1[0];  accumulate_grad_1 = None
+        return (call_accumulate_grad, call_accumulate_grad_1)
 """,
                 )
 
@@ -217,8 +221,8 @@ class GraphModule(torch.nn.Module):
 
         for backend in ["inductor"]:
             torch._dynamo.reset()
-            x = torch.tensor([0.5, 0.5], requires_grad=True)
-            y = torch.tensor([0.5, 0.5], requires_grad=True)
+            x = torch.tensor([0.5, 0.5], requires_grad=True, device=device_type)
+            y = torch.tensor([0.5, 0.5], requires_grad=True, device=device_type)
 
             class MyObj:
                 def __init__(self) -> None:
@@ -234,7 +238,7 @@ class GraphModule(torch.nn.Module):
 
             fn = torch.compile(fn, backend=backend, fullgraph=True)
             out = fn(x, y)
-            grad_out = torch.tensor([2.0, 2.0])
+            grad_out = torch.tensor([2.0, 2.0], device=device_type)
             with compiled_autograd._enable(compiler_fn):
                 out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
@@ -263,15 +267,15 @@ class GraphModule(torch.nn.Module):
         aot0_tangents_1: "f32[2]" = call_aot_bwd_prologue[0];  call_aot_bwd_prologue = None
 
         accumulate_grad = torch__dynamo_compiled_autograd_ops_AccumulateGrad([aot0_tangents_1], getitem_1, None, False);  getitem_1 = None
-        getitem_11: "f32[2]" = accumulate_grad[0];  accumulate_grad = None
+        call_accumulate_grad: "f32[2]" = accumulate_grad[0];  accumulate_grad = None
 
         add: "Sym(s45 + 1)" = l_hooks_1_keywords_fn_keywords_obj_counter + 1;  l_hooks_1_keywords_fn_keywords_obj_counter = None
 
         result: "f32[2]" = aot0_tangents_1 * aot0_tangents_1;  aot0_tangents_1 = None
 
         accumulate_grad_1 = torch__dynamo_compiled_autograd_ops_AccumulateGrad([result], getitem_2, None, False);  result = getitem_2 = None
-        getitem_12: "f32[2]" = accumulate_grad_1[0];  accumulate_grad_1 = None
-        return (getitem_11, getitem_12, add)
+        call_accumulate_grad_1: "f32[2]" = accumulate_grad_1[0];  accumulate_grad_1 = None
+        return (call_accumulate_grad, call_accumulate_grad_1, add)
 """,
                 )
 
@@ -297,8 +301,8 @@ class GraphModule(torch.nn.Module):
 
         for backend in ["eager", "aot_eager", "inductor"]:
             torch._dynamo.reset()
-            x = torch.tensor([0.5, 0.5], requires_grad=True)
-            y = torch.tensor([0.5, 0.5], requires_grad=True)
+            x = torch.tensor([0.5, 0.5], requires_grad=True, device=device_type)
+            y = torch.tensor([0.5, 0.5], requires_grad=True, device=device_type)
 
             def fn(x, y):
                 x.register_hook(_graph_break_invoke)
@@ -306,7 +310,7 @@ class GraphModule(torch.nn.Module):
 
             fn = torch.compile(fn, backend=backend, fullgraph=True)
             out = fn(x, y)
-            grad_out = torch.tensor([2.0, 2.0])
+            grad_out = torch.tensor([2.0, 2.0], device=device_type)
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
                 "print",
