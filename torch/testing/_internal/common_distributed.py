@@ -2245,7 +2245,9 @@ class MultiProcContinuousTest(TestCase):
                         p, completion_queue, timeout=get_timeout(self.id())
                     )
                     if deferred_exception is not None:
-                        # Already captured an exception; just drain
+                        # Propagate python exception from other ranks
+                        if isinstance(rv, BaseException):
+                            logger.warning(f"Rank {i} also failed in {self.id()}:\n{rv}")
                         continue
                     if isinstance(rv, unittest.SkipTest):
                         deferred_exception = rv
