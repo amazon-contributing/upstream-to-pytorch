@@ -16320,6 +16320,7 @@ op_db: list[OpInfo] = [
     OpInfo('nn.functional.unfold',
            aten_name='im2col',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.bool),
+           dtypesIf={'neuron': all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16)},
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_nn_unfold,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
@@ -16492,6 +16493,7 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.uint8),
+           dtypesIf={'neuron': floating_types_and(torch.uint8, torch.half, torch.bfloat16)},
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample_aa, 'bilinear'),
