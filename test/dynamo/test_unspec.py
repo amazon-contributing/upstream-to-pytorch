@@ -25,6 +25,9 @@ from torch.testing._internal.logging_utils import logs_to_string
 # test_dynamic_shapes will cover both the YOLO and non-YOLO cases.
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
 @torch._dynamo.config.patch(assume_static_by_default=False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_numpy_correctness(self):

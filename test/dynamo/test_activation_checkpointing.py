@@ -2715,7 +2715,7 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
 
         return result, captured_gm
 
-    @unittest.skipIf(not HAS_GPU_AND_TRITON, "GPU not available")
+    @unittest.skipIf(not torch.accelerator.is_available(), "CUDA not available")
     def test_ac_rematerialize_simple_forward_backward(self):
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
