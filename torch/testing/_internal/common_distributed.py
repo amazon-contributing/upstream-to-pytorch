@@ -1792,6 +1792,12 @@ class MultiProcContinuousTest(TestCase):
     poison_pill: bool = False
     # Flag for lazy process spawning (to support instantiate_device_type_tests)
     _processes_spawned: bool = False
+    # How long tearDownClass waits for a worker to exit after its shutdown
+    # sentinel before escalating to terminate()/kill(). Teardown is a queue
+    # sentinel plus process exit, so only a wedged worker should reach this.
+    TEARDOWN_JOIN_TIMEOUT: int = 120
+    # Grace period after each escalation signal before trying the next one.
+    TEARDOWN_KILL_GRACE: int = 10
 
     @classmethod
     def backend_str(cls) -> str | None:
@@ -2067,9 +2073,27 @@ class MultiProcContinuousTest(TestCase):
         for task_queue in cls.task_queues:
             task_queue.put(None)
 
-        # Wait for all workers to exit
-        for process in cls.processes:
-            process.join()
+        # Wait for all workers to exit, but do not wait forever. A worker wedged
+        # inside a collective (or otherwise stuck) never consumes its sentinel and
+        # never exits, and an unbounded join() here turns that into a hang of the
+        # whole test process rather than a reported failure. Escalate to
+        # terminate() and then kill() so a stuck worker cannot outlive the class.
+        for rank, process in enumerate(cls.processes):
+            process.join(cls.TEARDOWN_JOIN_TIMEOUT)
+            for escalation, signal_name in (
+                (process.terminate, "SIGTERM"),
+                (process.kill, "SIGKILL"),
+            ):
+                if not process.is_alive():
+                    break
+                logger.warning(
+                    "Rank %s did not exit within %ss of the shutdown sentinel; sending %s",
+                    rank,
+                    cls.TEARDOWN_JOIN_TIMEOUT,
+                    signal_name,
+                )
+                escalation()
+                process.join(cls.TEARDOWN_KILL_GRACE)
 
         # Clear up the rendezvous file
         try:
