@@ -74,10 +74,7 @@ class UnflattenTests(TestCase):
         print(f"Equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
 
-devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(
-    UnflattenTests, globals(), only_for=devices, allow_xpu=True
-)
+instantiate_device_type_tests(UnflattenTests, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
