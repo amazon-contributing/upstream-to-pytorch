@@ -272,9 +272,9 @@ class ScheduleTest(MultiProcContinuousTest):
             world_size=self.world_size, device=self.device, rank=self.rank
         )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @parametrize("ScheduleClass", [_ScheduleForwardOnly])
     @skip_if_lt_x_gpu(4)
@@ -307,9 +307,9 @@ class ScheduleTest(MultiProcContinuousTest):
                 x_clone = mod_ref(x_clone)
             torch.testing.assert_close(x_clone, out)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @parametrize(
         "ScheduleClass",
@@ -385,9 +385,9 @@ class ScheduleTest(MultiProcContinuousTest):
         if self.rank == self.world_size - 1:
             self.assertTrue(len(losses) > 0, "Losses should be computed during eval()")
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @parametrize(
         "ScheduleClass",
@@ -450,9 +450,9 @@ class ScheduleTest(MultiProcContinuousTest):
         if self.rank == self.world_size - 1:
             self.assertTrue(output is None, "Output should be None")
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     @skip_if_lt_x_gpu(4)
@@ -474,9 +474,9 @@ class ScheduleTest(MultiProcContinuousTest):
 
         dist.barrier(device_ids=[self.rank])
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     @skip_if_lt_x_gpu(4)
@@ -527,9 +527,9 @@ class ScheduleTest(MultiProcContinuousTest):
             torch.testing.assert_close(out, ref_out, rtol=1e-2, atol=5e-3)
             torch.testing.assert_close(pipe_loss, ref_loss)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     @skip_if_lt_x_gpu(4)
@@ -569,9 +569,9 @@ class ScheduleTest(MultiProcContinuousTest):
         # Check gradients using helper method
         check_gradients(self.config, stage_module, ref_mod)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     @parametrize("shape_inference", [True, False])
@@ -631,9 +631,9 @@ class ScheduleTest(MultiProcContinuousTest):
         # Check gradients using helper method
         check_gradients(self.config, stage_module, ref_mod)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @parametrize(
         "ScheduleClass",
@@ -703,9 +703,9 @@ class ScheduleTest(MultiProcContinuousTest):
             self.config, stage_modules, ref_mod, submod_names, rtol=5e-3, atol=5e-3
         )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @parametrize("ScheduleClass", [ScheduleInterleavedZeroBubble])
     @skip_if_lt_x_gpu(4)
@@ -787,9 +787,9 @@ class ScheduleTest(MultiProcContinuousTest):
         # Check gradients using helper method
         check_gradients(self.config, stage_modules, ref_mod, submod_names)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @parametrize(
         "schedule_class",
@@ -836,9 +836,9 @@ class ScheduleTest(MultiProcContinuousTest):
         # Check gradients using helper method
         check_gradients(self.config, stage_modules, ref_mod, submod_names)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @skip_if_lt_x_gpu(4)
     def test_custom_function_callback(self):
@@ -1039,7 +1039,7 @@ class ScheduleTest(MultiProcContinuousTest):
         check_gradients(self.config, stage_modules, ref_mod, submod_names)
 
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @parametrize(
         "ScheduleClass",
@@ -1194,9 +1194,9 @@ class CustomSchedulesTest(MultiProcContinuousTest):
             world_size=self.world_size, device=self.device, rank=self.rank
         )
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @parametrize(
         "schedule_class",
@@ -1247,9 +1247,9 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         # Check gradients using helper method
         check_gradients(self.config, stage_modules, ref_mod, submod_names)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @parametrize("ScheduleClass", [ScheduleWithReorderedB])
     @skip_if_lt_x_gpu(4)
@@ -1311,9 +1311,9 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         # Check gradients using helper method
         check_gradients(self.config, stage_modules, ref_mod, submod_names)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend([backend])
     @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+        not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ devices"
     )
     @parametrize("ScheduleClass", [ScheduleWithW])
     @skip_if_lt_x_gpu(4)
