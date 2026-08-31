@@ -56,7 +56,9 @@ from torch.utils.checkpoint import (
 )
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 if HAS_GPU_AND_TRITON:
@@ -2100,7 +2102,7 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return torch.utils.checkpoint.checkpoint(gn, x, use_reentrant=True)
 
-        x = torch.randn(4, 4, requires_grad=True)
+        x = torch.randn(4, 4, device=device_type, requires_grad=True)
         fn(x).sum().backward()
         # The mutation is reapplied in the backward as well
         self.assertEqual(counter, 2)
@@ -2269,7 +2271,9 @@ class GraphModule(torch.nn.Module):
                     preserve_rng_state=True,
                 )
 
-            input_eager = InputNode(x=torch.randn(2, 4, requires_grad=True))
+            input_eager = InputNode(
+                x=torch.randn(2, 4, device=device_type, requires_grad=True)
+            )
             torch.manual_seed(0)
             output_eager = checkpointed_forward(input_eager)
             output_eager.y.sum().backward()
@@ -2583,8 +2587,8 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
                 return (torch.mm(a, y) + 1).relu()
 
         cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        x = torch.randn(8, 8, requires_grad=True)
-        y = torch.randn(8, 8, requires_grad=True)
+        x = torch.randn(8, 8, device=device_type, requires_grad=True)
+        y = torch.randn(8, 8, device=device_type, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, "conflicting budgets"):
             cfn(x, y).sum().backward()
 
@@ -2599,8 +2603,8 @@ cos: aten.cos.default -> PREFER_RECOMPUTE""",
             return (a * 2).relu()
 
         cfn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        x = torch.randn(8, 8, requires_grad=True)
-        y = torch.randn(8, 8, requires_grad=True)
+        x = torch.randn(8, 8, device=device_type, requires_grad=True)
+        y = torch.randn(8, 8, device=device_type, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, "must cover the entire forward"):
             cfn(x, y).sum().backward()
 
