@@ -796,13 +796,13 @@ class TestStateDictStager(TestCase):
                 # Verify pinned memory status
                 self.assertEqual(
                     cpu_tensor1.is_pinned(),
-                    pin_memory,
-                    f"Tensor pinned status should be {pin_memory}",
+                    stager.pin_memory,
+                    f"Tensor pinned status should be {stager.pin_memory}",
                 )
                 self.assertEqual(
                     cpu_tensor2.is_pinned(),
-                    pin_memory,
-                    f"Tensor pinned status should be {pin_memory}",
+                    stager.pin_memory,
+                    f"Tensor pinned status should be {stager.pin_memory}",
                 )
 
                 # Verify shared memory status
