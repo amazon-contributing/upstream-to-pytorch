@@ -71,6 +71,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
+    TEST_XPU,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )

@@ -15,7 +15,7 @@ from torch._dynamo.graph_bytecode_inputs import (
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
-from torch.testing._internal.common_utils import requires_accelerator, requires_cuda
+from torch.testing._internal.common_utils import requires_accelerator, requires_cuda, TEST_XPU
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"

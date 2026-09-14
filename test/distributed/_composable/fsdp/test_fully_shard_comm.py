@@ -68,6 +68,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    skipIfTorchInductor,
     TEST_CUDA,
     TEST_WITH_ROCM,
     TEST_XPU,
