@@ -110,6 +110,10 @@ TEST_PRIVATEUSE1_IPC = (
     and sys.platform != "win32"
 )
 
+TEST_PIN_MEMORY = torch.accelerator.is_available() and not (
+    (acc := torch.accelerator.current_accelerator()) is not None and acc.type == "mps"
+)
+
 # We want to use `spawn` if able because some of our tests check that the
 # data loader terminates gracefully. To prevent hanging in the testing
 # process, such data loaders are run in a separate subprocess.

@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     TEST_PRIVATEUSE1_DEVICE_TYPE,
     TestCase,
 )
+from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
 
 
 if is_fbcode():

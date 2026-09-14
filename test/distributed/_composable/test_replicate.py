@@ -15,7 +15,7 @@ from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_PRIVATEUSE1, TEST_XPU
+from torch.testing._internal.common_utils import IS_LINUX, run_tests, TEST_PRIVATEUSE1, TEST_WITH_ROCM, TEST_XPU
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
