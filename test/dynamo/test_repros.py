@@ -8490,35 +8490,6 @@ SavedForBackwardsAOTOutput(idx=5)""",
             def cls_meth(cls, x):
                 return x
 
-    @requires_accelerator
-    def test_norm_dtype(self, device):
-        def foo(_stack0):
-            getitem = _stack0[(slice(None, None, None), -1)]
-            _stack0 = None
-            normalize = torch.nn.functional.normalize(getitem, p=2, dim=1)
-            getitem = None
-            return (normalize,)
-
-        def free_fn(x):
-            return x
-
-        target = {
-            "module_method": Mod().meth,
-            "plain_method": Plain().meth,
-            "classmethod": Plain.cls_meth,
-            "staticmethod": Plain().stat,
-            "function": free_fn,
-        }[kind]
-        wrapped = torch.compile(target, backend="eager")
-
-        def fn(x):
-            return x + 1, wrapped.__name__, wrapped.__qualname__
-
-        x = torch.zeros(1)
-        expected = fn(x)
-        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
-        self.assertEqual(expected, actual)
-
     # https://github.com/pytorch/pytorch/issues/190171
     def test_getfullargspec_on_dynamo_ctx_method(self):
         # What pytorch-lightning does: rebind a step method to a dynamo-wrapped
@@ -8591,15 +8562,6 @@ SavedForBackwardsAOTOutput(idx=5)""",
             elementwise_dtypes,
             ELEMENTWISE_TYPE_PROMOTION_KIND,
         )
-
-    @requires_accelerator
-    def test_memleak_when_graph_input_has_tensor_attr(self, device):
-        @torch.compile(backend="eager")
-        def f(x):
-            x.add_(1)
-
-        result = fn(torch.randint(0, 10, (3,)))
-        self.assertEqual(result.dtype, torch.float32)
 
     def test_elementwise_dtypes_multi_args(self):
         from torch._prims_common import (
