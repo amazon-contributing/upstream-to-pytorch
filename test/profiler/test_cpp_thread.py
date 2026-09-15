@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import (
     TEST_PRIVATEUSE1_DEVICE_TYPE,
     TestCase,
 )
-from torch.testing._internal.common_device_type import skipCUDAIf, skipXPUIf
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, skipCUDAIf, skipXPUIf
 
 
 if is_fbcode():
@@ -320,6 +320,8 @@ class CppThreadTestPrivateUse1(TestCase):
             }
         )
 
+
+instantiate_device_type_tests(CppThreadTest, globals(), only_for=("cuda", "xpu"))
 
 if __name__ == "__main__":
     run_tests()
