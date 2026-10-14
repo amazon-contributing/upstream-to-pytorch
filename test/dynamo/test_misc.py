@@ -1982,13 +1982,15 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             def forward(self, x):
                 batch_size = x.size(0)
                 h = torch.zeros(
-                    self.num_layers, batch_size, self.hidden_size
+                    self.num_layers, batch_size, self.hidden_size, device=x.device
                 ).share_memory_()
-                c = torch.zeros(self.num_layers, batch_size, self.hidden_size)
+                c = torch.zeros(
+                    self.num_layers, batch_size, self.hidden_size, device=x.device
+                )
                 return x + h.sum() + c.sum()
 
         model = Model()
-        x = torch.randn(4, 10)
+        x = torch.randn(4, 10, device=device_type)
         expected = model(x)
         compiled_model = torch.compile(model, fullgraph=False, backend="eager")
         actual = compiled_model(x)
@@ -17364,9 +17366,9 @@ def forward(self, L_x_ : torch.Tensor):
         """
 
         def fn():
-            m = torch.nn.Linear(5, 7)
+            m = torch.nn.Linear(5, 7, device=device_type)
             torch.nn.utils.spectral_norm(m)
-            return m(torch.randn(3, 5))
+            return m(torch.randn(3, 5, device=device_type))
 
         opt = torch.compile(fn, backend="eager")
         result = opt()

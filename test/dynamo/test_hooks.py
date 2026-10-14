@@ -600,19 +600,19 @@ def forward(self, L_x_ : torch.Tensor):
                     return (z,)
 
             mod = MyMod()
-            x0 = torch.ones(4, requires_grad=True)
+            x0 = torch.ones(4, requires_grad=True, device=device_type)
             eager_out = mod(x0)
-            eager_out[0].backward(torch.ones(4))
+            eager_out[0].backward(torch.ones(4, device=device_type))
 
-            x1 = torch.ones(4, requires_grad=True)
+            x1 = torch.ones(4, requires_grad=True, device=device_type)
             mod_compiled = aot_module_simplified(mod, (x1,), nop)
             aot_out = mod_compiled(x1)
-            aot_out[0].backward(torch.ones(4))
+            aot_out[0].backward(torch.ones(4, device=device_type))
 
-            x2 = torch.ones(4, requires_grad=True)
+            x2 = torch.ones(4, requires_grad=True, device=device_type)
             dynamo_out = torch.compile(mod, backend=backend, fullgraph=True)(x2)
             with compiled_autograd._enable(compiler_fn):
-                dynamo_out[0].backward(torch.ones(4))
+                dynamo_out[0].backward(torch.ones(4, device=device_type))
 
             self.assertEqual(dynamo_out, aot_out)
             self.assertEqual(dynamo_out, eager_out)

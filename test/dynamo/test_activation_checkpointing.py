@@ -2102,7 +2102,7 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return torch.utils.checkpoint.checkpoint(gn, x, use_reentrant=True)
 
-        x = torch.randn(4, 4, requires_grad=True)
+        x = torch.randn(4, 4, requires_grad=True, device=device_type)
         fn(x).sum().backward()
         # The mutation is reapplied in the backward as well
         self.assertEqual(counter, 2)
@@ -2271,7 +2271,9 @@ class GraphModule(torch.nn.Module):
                     preserve_rng_state=True,
                 )
 
-            input_eager = InputNode(x=torch.randn(2, 4, requires_grad=True))
+            input_eager = InputNode(
+                x=torch.randn(2, 4, requires_grad=True, device=device_type)
+            )
             torch.manual_seed(0)
             output_eager = checkpointed_forward(input_eager)
             output_eager.y.sum().backward()
@@ -3212,13 +3214,13 @@ def forward(self, arg0_1):
                 return checkpoint(self.block, x, use_reentrant=False)
 
         dim = 32
-        block = Block(dim)
+        block = Block(dim).to(device_type)
 
-        x_ref = torch.randn(4, dim, requires_grad=True)
+        x_ref = torch.randn(4, dim, requires_grad=True, device=device_type)
         ref = block(x_ref)
         ref.sum().backward()
 
-        block_cp = Block(dim)
+        block_cp = Block(dim).to(device_type)
         block_cp.load_state_dict(block.state_dict())
         wrapped = CheckpointedBlock(block_cp)
 
