@@ -967,7 +967,7 @@ def forward(self, L_x_ : torch.Tensor):
 
         def test_fn(fn):
             fn(x, y)
-            b = torch.tensor([2.0, 2.0, 2.0], requires_grad=True)
+            b = torch.tensor([2.0, 2.0, 2.0], requires_grad=True, device=device_type)
             x.backward(b)
             if cnts:
                 self.assertEqual(cnts.frame_count, 1)
