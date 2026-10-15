@@ -16692,6 +16692,9 @@ fn
                 # Shouldn't error here because we already invoked once
                 _ = compiled_fn(x)
 
+                # Reset so that aot_eager compiles a new entry, also if a harness
+                # maps both backends to one backend.
+                torch._dynamo.reset()
                 compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
                 with self.assertRaisesRegex(
                     RuntimeError,
