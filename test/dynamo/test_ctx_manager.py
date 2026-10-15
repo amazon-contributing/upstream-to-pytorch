@@ -260,7 +260,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         ref = fn(a, b)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(a, b)
-        self.assertTrue(same(ref, res))
+        # A backend can fuse mm and add and round to bfloat16 once, which is
+        # more accurate than eager's two roundings. Allow one bfloat16 ulp.
+        self.assertTrue(same(ref, res, tol=1e-2))
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
