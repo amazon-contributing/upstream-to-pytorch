@@ -1762,7 +1762,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         res = opt_m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        # fp32 tolerance: a compiled conv can accumulate in another order (a few ulp).
+        torch.testing.assert_close(res, ref, check_device=False)
 
     def test_conv_transpose_call_forward_directly(self):
         m = ConvTransposeCallForwardDirectly()
@@ -1770,7 +1771,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         res = opt_m(x)
-        self.assertTrue(torch.allclose(ref, res))
+        # fp32 tolerance: a compiled conv can accumulate in another order (a few ulp).
+        torch.testing.assert_close(res, ref, check_device=False)
 
     def test_conv_call_super_forward_directly(self):
         x = torch.randn(4, 4)

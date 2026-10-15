@@ -163,9 +163,27 @@ class TestTensorMetaProp(torch._dynamo.test_case.TestCase):
             )
 
             # Test 3: Verify gradients match (with tolerance for float16/bfloat16)
+            grad_eager = args_eager[requires_grad_idx].grad
+            grad_compiled = args_compiled[requires_grad_idx].grad
+            tol = {}
+            if (
+                self.device_type != "cpu"
+                and dtype in (torch.float16, torch.bfloat16)
+                and isinstance(grad_compiled, torch.Tensor)
+            ):
+                # A device compiler can reduce a broadcast backward in fp32, where eager
+                # rounds each product to the dtype first. Allow one ulp of the largest
+                # finite gradient, on top of the default dtype tolerance.
+                finite = grad_compiled[grad_compiled.isfinite()].abs()
+                scale = finite.max().item() if finite.numel() else 0.0
+                tol = {
+                    "atol": max(1e-5, torch.finfo(dtype).eps * scale),
+                    "rtol": 1e-3 if dtype == torch.float16 else 1.6e-2,
+                }
             self.assertEqual(
-                args_eager[requires_grad_idx].grad,
-                args_compiled[requires_grad_idx].grad,
+                grad_eager,
+                grad_compiled,
+                **tol,
                 msg=lambda msg: f"{msg}\n{op.name}: Gradient mismatch indicates metadata not propagated during tracing",
             )
 
