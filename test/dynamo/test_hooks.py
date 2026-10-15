@@ -908,28 +908,28 @@ def forward(self, L_x_ : torch.Tensor):
                 return (z,)
 
         mod = MyMod()
-        x0 = torch.ones(4, requires_grad=True)
+        x0 = torch.ones(4, requires_grad=True, device=device_type)
         eager_out = mod(x0)
-        eager_out[0].backward(torch.ones(4))
+        eager_out[0].backward(torch.ones(4, device=device_type))
 
-        x1 = torch.ones(4, requires_grad=True)
+        x1 = torch.ones(4, requires_grad=True, device=device_type)
         with compiled_autograd._enable(compiler_fn):
             cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
             comp_mod = torch.compile(mod, backend=cnts, fullgraph=True)
             comp_out = comp_mod(x1)
-            comp_out[0].backward(torch.ones(4))
+            comp_out[0].backward(torch.ones(4, device=device_type))
 
             self.assertEqual(cnts.frame_count, 1)
             my_hook = my_hook2
             self.assertEqual(x0.grad, x1.grad)
 
             eager_out = mod(x0)
-            eager_out[0].backward(torch.ones(4))
+            eager_out[0].backward(torch.ones(4, device=device_type))
 
             comp_out = comp_mod(x1)
 
             self.assertEqual(cnts.frame_count, 1)
-            comp_out[0].backward(torch.ones(4))
+            comp_out[0].backward(torch.ones(4, device=device_type))
             self.assertEqual(x0.grad, x1.grad)
 
     def test_functools_arg_vary(self):
@@ -967,7 +967,7 @@ def forward(self, L_x_ : torch.Tensor):
 
         def test_fn(fn):
             fn(x, y)
-            b = torch.tensor([2.0, 2.0, 2.0], requires_grad=True)
+            b = torch.tensor([2.0, 2.0, 2.0], requires_grad=True, device=device_type)
             x.backward(b)
             if cnts:
                 self.assertEqual(cnts.frame_count, 1)
@@ -1006,7 +1006,7 @@ def forward(self, L_x_ : torch.Tensor):
         def hook(param):
             param.grad *= 2
 
-        x = torch.ones(10)
+        x = torch.ones(10, device=device_type)
         x.requires_grad = True
 
         def run(input):
