@@ -32,6 +32,12 @@ if acc := torch.accelerator.current_accelerator(True):
     devices += [acc.type]
 
 
+def compile_backend_for_device(device):
+    device_type = torch.device(device).type
+    registered = torch.compiler.list_backends()
+    return device_type if device_type in registered else "inductor"
+
+
 def with_comms(func=None):
     if func is None:
         return partial(with_comms)
@@ -900,7 +906,7 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
         output_split_sizes = [input_tensor.shape[0] // group_size] * group_size
         input_split_sizes = output_split_sizes
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(backend=compile_backend_for_device(self.device), fullgraph=True)
         def compiled_fn(tensor):
             output = torch.ops._c10d_functional_autograd.all_to_all_single(
                 tensor,
