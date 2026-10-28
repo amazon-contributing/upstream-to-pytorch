@@ -2093,7 +2093,6 @@ class TestFP8Matmul(TestCase):
 
     @onlyAccelerator
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
-    @onlyOn(["cuda", "xpu"])
     @parametrize("test_case_name", [
         "a_eye_b_eye",
         "a_ones_b_ones",
@@ -2337,8 +2336,8 @@ class TestFP8Matmul(TestCase):
 
         C_ref = A_ref @ B_ref.t()
 
-        # convert to swizzled format
-        if not torch.version.hip and "xpu" not in device:
+        # convert to swizzled format. Only CUDA (not ROCm) takes swizzled MX scales.
+        if self.device_type == "cuda" and not torch.version.hip:
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
 
