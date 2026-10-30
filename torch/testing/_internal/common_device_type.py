@@ -889,6 +889,13 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
 
     @classmethod
     def get_primary_device(cls):
+        if not hasattr(cls, "primary_device"):
+            # Resolve the backend here rather than letting the caller fall back to
+            # cls.setUpClass(): on a generated device class that runs the test
+            # template setUpClass at instantiation time, outside any test, and
+            # whatever it enters (e.g. torch._dynamo.test_case.TestCase config
+            # patches) is never exited.
+            PrivateUse1TestBase.setUpClass.__func__(cls)
         return cls.primary_device
 
     @classmethod
