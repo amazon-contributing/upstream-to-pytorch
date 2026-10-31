@@ -40,7 +40,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 import test_c10d_common
-from test_c10d_common import gpus_for_rank, ModuleForDdpCommHook
+from test_c10d_common import devices_for_rank, ModuleForDdpCommHook
 
 
 DEVICE_TYPE = torch.accelerator.current_accelerator().type
@@ -95,7 +95,7 @@ class DistributedDataParallelTest(
     def _test_fp16(self, gradient_as_bucket_view=False):
         process_group = self._get_process_group()
 
-        dev_ids = gpus_for_rank(self.world_size)[self.rank]
+        dev_ids = devices_for_rank(self.world_size)[self.rank]
         device = torch.device(DEVICE_TYPE, dev_ids[0])
         model = nn.Linear(1, 1, bias=False).to(device).half()
         nn.init.constant_(model.weight, 1)
@@ -160,7 +160,7 @@ class DistributedDataParallelTest(
                     F.softmax(self.fc3(x), dim=1),
                 )
 
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
         model = DistributedDataParallel(
             ForwardReturnValueModule().float().to(device_id),
             device_ids=[device_id],
@@ -269,7 +269,7 @@ class DistributedDataParallelTest(
                     F.softmax(self.module1(x), dim=1),
                 )
 
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
         model = DistributedDataParallel(
             MultipleOutputModule().float().to(device_id),
             device_ids=[device_id],
@@ -322,7 +322,7 @@ class DistributedDataParallelTest(
                 x = self.relu(self.fc2(x))
                 return F.softmax(x, dim=1)
 
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
         model = DistributedDataParallel(
             NoGradModule().float().to(device_id),
             device_ids=[device_id],
@@ -375,7 +375,7 @@ class DistributedDataParallelTest(
                 x = self.relu(self.fc2(x))
                 return F.softmax(x, dim=1)
 
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
         model = TestModel().float().to(device_id)
         ddp = DistributedDataParallel(
             model,
@@ -440,7 +440,7 @@ class DistributedDataParallelTest(
         state=None,
         static_graph=False,
     ):
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             ModuleForDdpCommHook().to(device_id),
             device_ids=[device_id],
@@ -819,7 +819,7 @@ class DistributedDataParallelTest(
     def test_bucket_cap_mb_list_initialization(self):
         """Test that bucket_cap_mb_list is properly converted to bucket_bytes_cap_list"""
         process_group = self._get_process_group()
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
 
         # Create a simple model for testing
         model = nn.Sequential(
@@ -860,7 +860,7 @@ class DistributedDataParallelTest(
     def test_bucket_cap_mb_list_default_behavior(self):
         """Test that default bucket_cap_mb is used when neither parameter is provided"""
         process_group = self._get_process_group()
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
 
         model = nn.Sequential(
             nn.Linear(10, 20),
@@ -895,7 +895,7 @@ class DistributedDataParallelTest(
     def test_bucket_cap_mb_alone(self):
         """Test that bucket_cap_mb works correctly when provided alone"""
         process_group = self._get_process_group()
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
 
         model = nn.Sequential(
             nn.Linear(10, 20),
