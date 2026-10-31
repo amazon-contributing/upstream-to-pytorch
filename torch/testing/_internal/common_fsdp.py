@@ -63,6 +63,7 @@ from torch.testing._internal.common_utils import (
     set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
+    TEST_PRIVATEUSE1,
     TEST_XPU,
 )
 from torch.utils._triton import has_triton

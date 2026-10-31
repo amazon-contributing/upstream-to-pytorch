@@ -54,13 +54,12 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._triton import has_triton_package
 
 
-@requires_accelerator
-
 def _get_accelerator_memory():
     try:
         return torch.accelerator.get_memory_info(0)[1]
-    except (NotImplementedError):
+    except NotImplementedError:
         return 0  # Return 0, as that would help skip the test is not skipped
+
 
 class TestDebugModeLogSerialization(TestCase):
     def _run_hashed_debug_mode(self, x):
@@ -215,7 +214,7 @@ class TestDebugModeLogSerialization(TestCase):
         self.assertTrue(any(math.isinf(mismatch["hash2"]) for mismatch in mismatches))
 
 
-@requires_cuda
+@requires_accelerator
 class TestDTensorDebugMode(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -1184,8 +1183,7 @@ class TestDTensorDebugMode(TestCase):
         )
 
     @unittest.skipIf(
-        not torch.accelerator.is_available()
-        or _get_accelerator_memory() < 2**26,
+        not torch.accelerator.is_available() or _get_accelerator_memory() < 2**26,
         "Being conservative, test peak memory is 25MB?",
     )
     def test_tensor_hash_redistribute(self):
