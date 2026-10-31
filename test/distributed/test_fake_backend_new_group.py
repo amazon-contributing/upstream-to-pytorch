@@ -15,8 +15,6 @@ FakeProcessGroup directly and still produces a hashed name.
 These tests use a real (gloo) parent on a single CPU process: no GPU needed.
 """
 
-import os
-
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.testing._internal.common_utils import (
@@ -30,10 +28,10 @@ class FakeBackendNewGroupTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
-        os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
-        os.environ.setdefault("MASTER_PORT", "29517")
         # Real (non-fake) parent so a fake child differs from the parent backend.
-        dist.init_process_group(backend="gloo", rank=0, world_size=1)
+        dist.init_process_group(
+            backend="gloo", rank=0, world_size=1, store=dist.HashStore()
+        )
 
     def tearDown(self):
         if dist.is_initialized():
