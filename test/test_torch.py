@@ -21,6 +21,7 @@ import warnings
 import types
 import pickle
 import textwrap
+import traceback
 import subprocess
 import weakref
 import sys
@@ -9474,6 +9475,35 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         x = torch.tensor([1., 1010.])
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpectedInline(str(x), '''tensor([1.0000e+00, 1.0100e+03])''')
+
+    def test_print_error_restores_functorch_dispatch_keys(self):
+        keys = ("FuncTorchDynamicLayerFrontMode", "FuncTorchDynamicLayerBackMode")
+
+        def excluded():
+            return {key: torch._C._dispatch_tls_is_dispatch_key_excluded(key) for key in keys}
+
+        def raise_sentinel(*args, **kwargs):
+            raise RuntimeError("tensor formatting failure")
+
+        expected = dict.fromkeys(keys, False)
+        self.assertEqual(excluded(), expected)
+        retained = []
+        try:
+            # assertRaises clears traceback frames and would hide the guard's lifetime.
+            with unittest.mock.patch.object(torch._tensor_str, "_str_intern", raise_sentinel):
+                try:
+                    repr(torch.empty(0, device="cpu"))
+                except RuntimeError as error:
+                    retained.append(error)
+            self.assertEqual(len(retained), 1)
+            self.assertEqual(str(retained[0]), "tensor formatting failure")
+            frames = traceback.extract_tb(retained[0].__traceback__)
+            self.assertIn(("_str", torch._tensor_str.__file__), [(f.name, f.filename) for f in frames])
+            self.assertEqual(excluded(), expected)
+        finally:
+            # FrameSummary objects above do not retain the original traceback frames.
+            retained.clear()
+
 
     def test_sizeof(self) -> None:
         sizeof_empty = torch.randn(0).storage().__sizeof__()
