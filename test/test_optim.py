@@ -30,6 +30,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyCUDA,
     skipMPS,
     TEST_WITH_ROCM,
 )
@@ -1073,8 +1074,7 @@ class TestOptimRenewed(TestCase):
             optim_cls([ref], foreach=True, **optim_input.kwargs).step()
             self.assertEqual(params[0][0], ref[0])
 
-    @onlyAccelerator
-    @skipMPS
+    @onlyCUDA
     @optims(
         [optim for optim in optim_db if "foreach" in optim.supported_impls],
         dtypes=[torch.float32],
