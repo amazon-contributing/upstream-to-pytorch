@@ -235,6 +235,7 @@ class TestForeachDevice(TestCase):
         from torch.testing._internal.common_dtype import (
             get_unsupported_dtypes_for_device,
         )
+
         device_type = torch.device(device).type
         backend_supports_complex = torch.complex64 not in (
             get_unsupported_dtypes_for_device(device_type)
@@ -1126,6 +1127,8 @@ class TestForeachDevice(TestCase):
     def test_big_num_tensors(self, device, dtype, op, use_accelerator_graph, w_empty):
         # foreach_max cannot handle empty tensors as max requires an identity
         device_type = torch.device(device).type
+        if use_accelerator_graph and device_type not in ("cuda", "xpu"):
+            self.skipTest("This test supports accelerator graphs only on CUDA and XPU")
         intersperse_empty_tensors = w_empty and op.name != "_foreach_max"
 
         N = 4000
