@@ -2,8 +2,10 @@
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from typing import Any
 from unittest.mock import patch
@@ -27,17 +29,16 @@ from torch.profiler import (
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyCPU,
     skipCPUIf,
 )
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
+    parametrize,
     run_tests,
     skipIfHpu,
     skipIfTorchDynamo,
     TemporaryFileName,
-    TEST_HPU,
-    TEST_PRIVATEUSE1,
-    TEST_PRIVATEUSE1_DEVICE_TYPE,
     TEST_XPU,
     TestCase,
 )
@@ -759,6 +760,107 @@ class TestExecutionTrace(TestCase):
                 found_cos = True
         if not found_cos:
             raise AssertionError("Expected to find cos node")
+
+    @onlyCPU
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @parametrize("capture_mode", ["data", "range"])
+    def test_execution_trace_integral_capture_failure(self, device, capture_mode):
+        # A fresh child keeps a broken callback from poisoning later tests.
+        script = textwrap.dedent(
+            """
+            import json
+            import os
+            import sys
+
+            import torch
+            from torch.profiler import (
+                ExecutionTraceObserver, ProfilerActivity, profile, record_function,
+            )
+
+            directory = sys.argv[1]
+            source = torch.zeros(2, 2, device="meta")
+            index = torch.tensor([[0, 0], [1, 0]], device="meta")
+            left, right = torch.ones(2), torch.ones(2)
+            first_path = os.path.join(directory, "first.et.json")
+            observer = ExecutionTraceObserver().register_callback(first_path)
+            observer.set_extra_resource_collection(True)
+            observer.start()
+            with record_function("OUTER"):
+                torch.gather(source, 1, index)
+                torch.add(left, right)
+            observer.stop()
+            observer.unregister_callback()
+
+            with profile(activities=[ProfilerActivity.CPU]) as prof:
+                torch.add(left, right)
+
+            second_path = os.path.join(directory, "second.et.json")
+            observer = ExecutionTraceObserver().register_callback(second_path)
+            observer.start()
+            with record_function("AFTER"):
+                torch.add(left, right)
+            observer.stop()
+            observer.unregister_callback()
+
+            with open(first_path) as stream:
+                first = json.load(stream)["nodes"]
+            with open(second_path) as stream:
+                second = json.load(stream)["nodes"]
+            print(json.dumps({
+                "first": first,
+                "second": second,
+                "later_adds": sum(e.name == "aten::add" for e in prof.events()),
+            }))
+            """
+        )
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("ENABLE_PYTORCH_EXECUTION_TRACE")
+        }
+        env.update(TORCH_DEVICE_BACKEND_AUTOLOAD="0", TORCH_CPP_LOG_LEVEL="WARNING")
+        if capture_mode == "data":
+            env["ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA"] = (
+                "aten::gather"
+            )
+        else:
+            env["ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE"] = "1"
+        with tempfile.TemporaryDirectory() as directory:
+            proc = subprocess.run(
+                [sys.executable, "-c", script, directory],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        details = f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        self.assertEqual(proc.returncode, 0, details)
+        self.assertTrue(proc.stdout.strip(), details)
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        first = result["first"]
+        outer = [node for node in first if node["name"] == "OUTER"]
+        gather = [node for node in first if node["name"] == "aten::gather"]
+        self.assertEqual(len(outer), 1, details)
+        self.assertEqual(len(gather), 1, details)
+        self.assertEqual(gather[0]["ctrl_deps"], outer[0]["id"], details)
+        for field in ("values", "shapes", "types", "strides"):
+            self.assertEqual(len(gather[0]["inputs"][field]), 4, details)
+        self.assertEqual(gather[0]["inputs"]["shapes"][0], [2, 2], details)
+        self.assertEqual(gather[0]["inputs"]["shapes"][2], [2, 2], details)
+        self.assertTrue(
+            any(
+                node["name"] == "aten::add" and node["ctrl_deps"] == outer[0]["id"]
+                for node in first
+            ),
+            details,
+        )
+        self.assertGreaterEqual(result["later_adds"], 1, details)
+        self.assertTrue(
+            any(node["name"] == "AFTER" for node in result["second"]), details
+        )
+        self.assertIn("Exception in execution trace observer", proc.stderr, details)
 
     @skipCPUIf(True, "accelerator required for integral tensor range profiling")
     @patch.dict(
