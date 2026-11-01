@@ -3695,6 +3695,9 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         self.supports_forward_ad = kwargs.get('supports_forward_ad', False)
         self.supports_fwgrad_bwgrad = kwargs.get('supports_fwgrad_bwgrad', False)
         self.device = torch.accelerator.current_accelerator(check_available=True)
+        if (self.has_sparse_gradients and self.device is not None
+                and self.device.type == torch._C._get_privateuse1_backend_name()):
+            self.should_test_accelerator = False
 
     def _check_gradients(self, test_case, module, input_tuple):
         params = tuple(x for x in module.parameters())
