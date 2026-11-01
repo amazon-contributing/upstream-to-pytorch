@@ -704,7 +704,15 @@ class <lambda>(torch.nn.Module):
             torch.Stream(device=device),
             torch.Stream(device=device),
         )
+        _, _, s0, _, s2 = inp
+        current = torch.accelerator.current_stream(device)
+        # The reference reads inputs created on the current stream.
+        s0.wait_stream(current)
+        s2.wait_stream(current)
         expected = fn(*inp)
+        # Join both output streams before running the comparison.
+        current.wait_stream(s0)
+        current.wait_stream(s2)
         (
             actual,
             _,
@@ -2867,6 +2875,7 @@ class <lambda>(torch.nn.Module):
         bytecode is generated, and the inner call's runtime object table must
         not leak into AOTAutograd tracing of the outer graph."""
         from functorch.compile import nop
+
         from torch._dynamo.backends.common import aot_autograd
 
         inner = torch.compile(
