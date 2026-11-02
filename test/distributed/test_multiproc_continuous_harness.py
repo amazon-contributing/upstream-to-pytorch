@@ -11,6 +11,14 @@ import torch.testing._internal.common_distributed as cd
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
+class _Process:
+    def __init__(self, alive=True):
+        self.alive = alive
+
+    def is_alive(self):
+        return self.alive
+
+
 # Built in a function so unittest doesn't collect and spawn them.
 def _classes():
     class Fake(cd.MultiProcContinuousTest):
@@ -52,15 +60,17 @@ class TestMultiProcContinuousHarness(TestCase):
         self.Fake.poison_pill = False
         t = self.Fake("test_x")
         t.rank = t.MAIN_PROCESS_RANK
-        t.processes = [None] * len(results)
+        t.processes = [_Process() for _ in results]
         t.completion_queues = [None] * len(results)
         it = iter(t.id() if r == "ok" else r for r in results)
         with patch.object(
             cd, "retrieve_result_from_completion_queue", lambda *a, **k: next(it)
         ):
-            t.test_x()
-        # Every queue must be drained so the next test sees its own results.
-        self.assertIsNone(next(it, None))
+            try:
+                t.test_x()
+            finally:
+                # Check consumption even when a failure or skip is raised.
+                self.assertIsNone(next(it, None))
 
     def test_failure_beats_skip(self):
         for results in (
@@ -85,18 +95,67 @@ class TestMultiProcContinuousHarness(TestCase):
         self._wait(["ok", "ok"])
         self.assertFalse(self.Fake.poison_pill)
 
-    def test_failure_stops_waiting(self):
+    def test_dead_rank_stops_waiting(self):
         self.Fake.poison_pill = False
         t = self.Fake("test_x")
         t.rank = t.MAIN_PROCESS_RANK
-        t.processes = [None, None]
+        t.processes = [_Process(False), _Process()]
         t.completion_queues = [None, None]
-        results = iter([ValueError("v"), t.id()])
+        results = iter([RuntimeError("Exited with -6"), t.id()])
         with patch.object(
             cd, "retrieve_result_from_completion_queue", lambda *a, **k: next(results)
         ):
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(RuntimeError, "Exited with -6"):
                 t.test_x()
+        self.assertEqual(next(results, None), t.id())
+        self.assertTrue(self.Fake.poison_pill)
+
+    def test_failure_drains_live_peers(self):
+        with self.assertRaisesRegex(ValueError, "first"):
+            self._wait([ValueError("first"), "ok", ValueError("second")])
+        self.assertTrue(self.Fake.poison_pill)
+
+    def test_dead_rank_stops_drain(self):
+        self.Fake.poison_pill = False
+        t = self.Fake("test_x")
+        t.rank = t.MAIN_PROCESS_RANK
+        t.processes = [_Process(), _Process(False), _Process()]
+        t.completion_queues = [None] * 3
+        results = iter([ValueError("first"), RuntimeError("Exited with -6"), t.id()])
+        with patch.object(
+            cd, "retrieve_result_from_completion_queue", lambda *a, **k: next(results)
+        ):
+            with self.assertRaisesRegex(ValueError, "first"):
+                t.test_x()
+        self.assertEqual(next(results, None), t.id())
+        self.assertTrue(self.Fake.poison_pill)
+
+    def test_failure_drain_has_shared_deadline(self):
+        self.Fake.poison_pill = False
+        t = self.Fake("test_x")
+        t.rank = t.MAIN_PROCESS_RANK
+        t.processes = [_Process() for _ in range(4)]
+        t.completion_queues = [None] * 4
+        results = iter([ValueError("first"), t.id(), t.id(), t.id()])
+        elapsed = iter([0, 6, 4])
+        now = 0
+        timeouts = []
+
+        def retrieve(process, completion_queue, timeout):
+            nonlocal now
+            timeouts.append(timeout)
+            now += next(elapsed)
+            return next(results)
+
+        with (
+            patch.object(cd, "get_timeout", return_value=10),
+            patch.object(cd.time, "monotonic", lambda: now),
+            patch.object(cd, "retrieve_result_from_completion_queue", retrieve),
+        ):
+            with self.assertRaisesRegex(ValueError, "first"):
+                t.test_x()
+        self.assertEqual(timeouts, [10, 10, 4])
+        self.assertEqual(now, 10)
         self.assertEqual(next(results, None), t.id())
         self.assertTrue(self.Fake.poison_pill)
 

@@ -899,7 +899,7 @@ def cleanup_temp_dir() -> None:
 def retrieve_result_from_completion_queue(
     process: torch.multiprocessing.Process,
     completion_queue: torch.multiprocessing.Queue,
-    timeout: int | None = None,
+    timeout: float | None = None,
 ) -> Any:
     """Get result from the completion_queue associated with process.
 
@@ -2258,15 +2258,21 @@ class MultiProcContinuousTest(TestCase):
         def wrapper(self):
             if self.rank == self.MAIN_PROCESS_RANK:
                 logger.debug(f"Waiting for workers to finish {self.id()}")  # noqa: G004
-                # A failure poisons the class, so no later test consumes its
-                # pending results. Let class teardown stop the remaining ranks.
+                # Live ranks may still be finishing their test after a peer
+                # fails. Drain them under one shared result-wait budget before
+                # teardown; a dead failing rank cannot finish its collectives.
                 # A failure on any rank takes precedence over a skip on another.
-                skip = None
+                skip = failure = deadline = None
                 for i, (p, completion_queue) in enumerate(
                     zip(self.processes, self.completion_queues)
                 ):
+                    timeout: float = get_timeout(self.id())
+                    if deadline is not None:
+                        timeout = deadline - time.monotonic()
+                        if timeout <= 0:
+                            break
                     rv = retrieve_result_from_completion_queue(
-                        p, completion_queue, timeout=get_timeout(self.id())
+                        p, completion_queue, timeout=timeout
                     )
                     if isinstance(rv, unittest.SkipTest):
                         skip = skip or rv
@@ -2276,17 +2282,24 @@ class MultiProcContinuousTest(TestCase):
                             f"Expected rv == self.id(), got {rv} != {self.id()}"
                         )
                     if isinstance(rv, BaseException):
-                        logger.warning(
-                            f"Detected failure from Rank {i} in: {self.id()}, "  # noqa: G004
-                            f"skipping rest of tests in Test class: {self.__class__.__name__}"
-                        )
-                        self.__class__.poison_pill = True
-                        raise rv
+                        if failure is None:
+                            logger.warning(
+                                f"Detected failure from Rank {i} in: {self.id()}, "  # noqa: G004
+                                f"skipping rest of tests in Test class: {self.__class__.__name__}"
+                            )
+                            self.__class__.poison_pill = True
+                            failure = rv
+                            deadline = time.monotonic() + get_timeout(self.id())
+                        if not p.is_alive():
+                            break
+                        continue
 
                     logger.debug(
                         f"Main proc detected rank {i} finished {self.id()}"  # noqa: G004
                     )
 
+                if failure is not None:
+                    raise failure
                 if skip is not None:
                     raise skip
             else:
