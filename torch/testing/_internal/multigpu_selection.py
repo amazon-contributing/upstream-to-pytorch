@@ -31,6 +31,7 @@ def _decorator_gpu_requirement(func: object | None) -> int:
             try:
                 best = max(best, int(getattr(func, attr)))  # type: ignore[arg-type]
             except (AttributeError, TypeError, ValueError):
+                # Missing or invalid stamps do not contribute a GPU requirement.
                 pass
         func = getattr(func, "__wrapped__", None)
     return best
