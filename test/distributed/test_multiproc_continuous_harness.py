@@ -27,6 +27,21 @@ def _sleep():
     time.sleep(1000)
 
 
+def _rank_with_unread_failure(task_queue, completion_queue, returned):
+    class Rank(cd.MultiProcContinuousTest):
+        @classmethod
+        def _init_pg(cls, rank, world_size, rdvz_file):
+            pass
+
+        @classmethod
+        def _run_test_given_id(cls, test_id, **kwargs):
+            # Keep an unread traceback larger than a normal pipe buffer.
+            raise RuntimeError("x" * 2**22)
+
+    Rank._worker_loop(0, 1, None, task_queue, completion_queue)
+    returned.set()
+
+
 class TestMultiProcContinuousHarness(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -69,6 +84,46 @@ class TestMultiProcContinuousHarness(TestCase):
     def test_pass(self):
         self._wait(["ok", "ok"])
         self.assertFalse(self.Fake.poison_pill)
+
+    def test_failure_stops_waiting(self):
+        self.Fake.poison_pill = False
+        t = self.Fake("test_x")
+        t.rank = t.MAIN_PROCESS_RANK
+        t.processes = [None, None]
+        t.completion_queues = [None, None]
+        results = iter([ValueError("v"), t.id()])
+        with patch.object(
+            cd, "retrieve_result_from_completion_queue", lambda *a, **k: next(results)
+        ):
+            with self.assertRaises(ValueError):
+                t.test_x()
+        self.assertEqual(next(results, None), t.id())
+        self.assertTrue(self.Fake.poison_pill)
+
+    def test_unread_result_does_not_block_exit(self):
+        ctx = multiprocessing.get_context("spawn")
+        task_queue, completion_queue = ctx.Queue(), ctx.Queue()
+        returned = ctx.Event()
+        p = ctx.Process(
+            target=_rank_with_unread_failure,
+            args=(task_queue, completion_queue, returned),
+            daemon=True,
+        )
+        p.start()
+        try:
+            task_queue.put("test")
+            task_queue.put(None)
+            self.assertTrue(returned.wait(60), "rank did not finish its worker loop")
+            p.join(60)
+            self.assertEqual(p.exitcode, 0)
+        finally:
+            if p.is_alive():
+                p.kill()
+                p.join()
+            task_queue.close()
+            task_queue.join_thread()
+            completion_queue.close()
+            completion_queue.join_thread()
 
     def test_teardown_kills_hung_ranks(self):
         ctx = multiprocessing.get_context("spawn")

@@ -2030,6 +2030,8 @@ class MultiProcContinuousTest(TestCase):
             logger.debug(f"Got test {test_id}")  # noqa: G004
             # None means exit
             if test_id is None:
+                # No result is consumed after shutdown; an unread result must not block exit.
+                completion_queue.cancel_join_thread()
                 break
 
             # If init failed with a skip, respond with SkipTest for all tests
@@ -2258,10 +2260,9 @@ class MultiProcContinuousTest(TestCase):
         def wrapper(self):
             if self.rank == self.MAIN_PROCESS_RANK:
                 logger.debug(f"Waiting for workers to finish {self.id()}")  # noqa: G004
-                # Drain all completion queues before raising any exception,
-                # so stale results don't desync subsequent tests. A failure on
-                # any rank takes precedence over a skip on another.
-                failure = None
+                # A failure poisons the class, so no later test consumes its
+                # pending results. Let class teardown stop the remaining ranks.
+                # A failure on any rank takes precedence over a skip on another.
                 skip = None
                 for i, (p, completion_queue) in enumerate(
                     zip(self.processes, self.completion_queues)
@@ -2277,21 +2278,17 @@ class MultiProcContinuousTest(TestCase):
                             f"Expected rv == self.id(), got {rv} != {self.id()}"
                         )
                     if isinstance(rv, BaseException):
-                        if failure is None:
-                            logger.warning(
-                                f"Detected failure from Rank {i} in: {self.id()}, "  # noqa: G004
-                                f"skipping rest of tests in Test class: {self.__class__.__name__}"
-                            )
-                            self.__class__.poison_pill = True
-                            failure = rv
-                        continue
+                        logger.warning(
+                            f"Detected failure from Rank {i} in: {self.id()}, "  # noqa: G004
+                            f"skipping rest of tests in Test class: {self.__class__.__name__}"
+                        )
+                        self.__class__.poison_pill = True
+                        raise rv
 
                     logger.debug(
                         f"Main proc detected rank {i} finished {self.id()}"  # noqa: G004
                     )
 
-                if failure is not None:
-                    raise failure
                 if skip is not None:
                     raise skip
             else:
