@@ -1243,7 +1243,9 @@ class FSDPTestMixin:
         # Actual tests will be skipped if there are not enough GPUs.
         try:
             if fake_pg:
-                store = torch.testing._internal.distributed.fake_pg.FakeStore()
+                from torch.testing._internal.distributed.fake_pg import FakeStore
+
+                store = FakeStore()
                 dist.init_process_group(
                     backend="fake",
                     world_size=self.world_size,
@@ -1594,7 +1596,9 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
         # Actual tests will be skipped if there are not enough GPUs.
         try:
             if fake_pg:
-                store = torch.testing._internal.distributed.fake_pg.FakeStore()
+                from torch.testing._internal.distributed.fake_pg import FakeStore
+
+                store = FakeStore()
                 dist.init_process_group(
                     backend="fake",
                     world_size=self.world_size,
