@@ -27,7 +27,6 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DEVICE_TYPE,
-    DISTRIBUTED_BACKEND,
     MLPStack,
 )
 from torch.testing._internal.common_utils import run_tests
@@ -53,7 +52,7 @@ class ReplicateTest(MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls) -> str:
-        return DISTRIBUTED_BACKEND
+        return dist.get_default_backend_for_device(DEVICE_TYPE)
 
     @classmethod
     def device_type(cls) -> str:
@@ -200,7 +199,9 @@ class ReplicateTest(MultiProcContinuousTest):
         This tests that a user can pass in a device mesh to replicate a module
         """
 
-        device = torch.device(DEVICE_TYPE, self.rank % torch.accelerator.device_count())
+        device = torch.device(
+            f"{DEVICE_TYPE}:{self.rank % torch.accelerator.device_count()}"
+        )
         model = Net().to(device)
         replicate_model = deepcopy(model)
 
@@ -226,7 +227,9 @@ class ReplicateTest(MultiProcContinuousTest):
         Tests that replicate_model has the same behavior as original model when training
         """
 
-        device = torch.device(DEVICE_TYPE, self.rank % torch.accelerator.device_count())
+        device = torch.device(
+            f"{DEVICE_TYPE}:{self.rank % torch.accelerator.device_count()}"
+        )
         model = Net().to(device)
         replicate_model = deepcopy(model)
 
