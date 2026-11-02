@@ -751,7 +751,12 @@ class <lambda>(torch.nn.Module):
             return y
 
         inp = (torch.ones(2, 2, device=device) + 1, torch.ones(2, 2, device=device))
-        expected = fn(*inp)
+        # The local streams are not exposed to the caller. Compute the same adds
+        # on the current stream for the numerical reference.
+        x, y = inp
+        z1 = torch.add(x, y)
+        z = torch.add(x, y)
+        expected = z + 2 + z1
         (
             actual,
             _,
@@ -794,7 +799,12 @@ class <lambda>(torch.nn.Module):
             return z0, y
 
         inp = (torch.ones(2, 2, device=device) + 1, torch.ones(2, 2, device=device))
-        expected = fn(*inp)
+        # The local streams are not exposed to the caller. Compute the same adds
+        # on the current stream for the numerical reference.
+        x, y = inp
+        z1 = torch.add(x, y)
+        z0 = torch.add(x, y)
+        expected = (z0, 2 + z1)
         (
             actual,
             _,
@@ -2875,7 +2885,6 @@ class <lambda>(torch.nn.Module):
         bytecode is generated, and the inner call's runtime object table must
         not leak into AOTAutograd tracing of the outer graph."""
         from functorch.compile import nop
-
         from torch._dynamo.backends.common import aot_autograd
 
         inner = torch.compile(
