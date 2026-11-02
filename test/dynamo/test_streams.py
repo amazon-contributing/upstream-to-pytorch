@@ -704,7 +704,15 @@ class <lambda>(torch.nn.Module):
             torch.Stream(device=device),
             torch.Stream(device=device),
         )
+        _, _, s0, _, s2 = inp
+        current = torch.accelerator.current_stream(device)
+        # The reference reads inputs created on the current stream.
+        s0.wait_stream(current)
+        s2.wait_stream(current)
         expected = fn(*inp)
+        # Join both output streams before running the comparison.
+        current.wait_stream(s0)
+        current.wait_stream(s2)
         (
             actual,
             _,
@@ -743,7 +751,12 @@ class <lambda>(torch.nn.Module):
             return y
 
         inp = (torch.ones(2, 2, device=device) + 1, torch.ones(2, 2, device=device))
-        expected = fn(*inp)
+        # The local streams are not exposed to the caller. Compute the same adds
+        # on the current stream for the numerical reference.
+        x, y = inp
+        z1 = torch.add(x, y)
+        z = torch.add(x, y)
+        expected = z + 2 + z1
         (
             actual,
             _,
@@ -786,7 +799,12 @@ class <lambda>(torch.nn.Module):
             return z0, y
 
         inp = (torch.ones(2, 2, device=device) + 1, torch.ones(2, 2, device=device))
-        expected = fn(*inp)
+        # The local streams are not exposed to the caller. Compute the same adds
+        # on the current stream for the numerical reference.
+        x, y = inp
+        z1 = torch.add(x, y)
+        z0 = torch.add(x, y)
+        expected = (z0, 2 + z1)
         (
             actual,
             _,
