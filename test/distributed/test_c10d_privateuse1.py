@@ -931,6 +931,10 @@ class DistributedDataParallelTest(
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     hw_classification = HardwareClassification.CUDA
 
+    @property
+    def device(self):
+        return torch.device(DEVICE_TYPE, self.rank)
+
     def setUp(self):
         super().setUp()
         # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -1094,6 +1098,10 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
 class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
     hw_classification = HardwareClassification.CUDA
+
+    @property
+    def device(self):
+        return torch.device(DEVICE_TYPE, self.rank)
 
     def setUp(self):
         super().setUp()
