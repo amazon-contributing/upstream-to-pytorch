@@ -14,9 +14,11 @@ from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import HardwareClassification, requires_cuda
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 aten = torch.ops.aten
 
@@ -87,7 +89,7 @@ class TestCompilerBisector(TestCase):
             torch._dynamo.reset()
             with patch_exp_decomp():
                 vq_compiled = torch.compile(vq)  # noqa: UNSPECIFIED_BACKEND
-                x = torch.randn(4, 400, 256, device=GPU_TYPE)
+                x = torch.randn(4, 400, 256).to(device_type)
                 with torch._dynamo.utils.preserve_rng_state():
                     vq(x)
                 out_compiled = vq_compiled(x)
@@ -161,7 +163,7 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
 
-            inp = torch.rand([10], device=GPU_TYPE)
+            inp = torch.rand([10], device=device_type)
 
             out = foo(inp)
             out_c = torch.compile(foo)(inp)  # noqa: UNSPECIFIED_BACKEND
@@ -291,7 +293,7 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             torch._dynamo.reset()
 
-            x = torch.randn(1024, device=GPU_TYPE)
+            x = torch.randn(1024, device=device_type)
             with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
                 opt_f = torch.compile(f, backend=MyBackend())
                 return torch.allclose(opt_f(x), f(x))
@@ -332,7 +334,7 @@ class TestCompilerBisector(TestCase):
             try:
                 foo_c = torch.compile(foo, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
                 bar_c = torch.compile(bar, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
-                x = torch.randn(10, device=GPU_TYPE)
+                x = torch.randn(10, device=device_type)
                 foo_c(x)
                 bar_c(x)
 
