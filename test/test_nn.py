@@ -9012,8 +9012,9 @@ class TestNNDeviceType(NNTestCase):
 
         nodes = _graph_node_names(y.grad_fn)
         self.assertFalse([n for n in nodes if 'CopySlices' in n or 'AsStrided' in n], nodes)
-        # 2D returns the addmm result directly, without any reshape
-        if len(shape) > 2:
+        # 2D returns the addmm result directly, without any reshape. A backend that
+        # implements linear itself (LinearBackward0) does not reshape either.
+        if len(shape) > 2 and 'LinearBackward0' not in nodes:
             self.assertIn('UnsafeViewBackward0', nodes)
 
         # matmul path, which does not go through _flatten_nd_linear
