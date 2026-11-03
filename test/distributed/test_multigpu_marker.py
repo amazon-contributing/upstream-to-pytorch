@@ -34,13 +34,13 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import IS_SANDCASTLE, run_tests, TestCase
 
 
-# The marker resolver lives in test/conftest.py. Make it importable whether this
-# file is run under pytest (test/ already on sys.path) or directly.
+# Make sibling distributed test modules importable whether this file is run
+# under pytest (test/ already on sys.path) or directly.
 _TEST_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _TEST_ROOT not in sys.path:
     sys.path.insert(0, _TEST_ROOT)
 
-from conftest import (
+from torch.testing._internal.multigpu_selection import (
     _decorator_gpu_requirement,
     _resolve_gpu_requirement,
     MultiGpuMinFilterPlugin,

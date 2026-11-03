@@ -6,6 +6,7 @@ import weakref
 
 import torch
 import torch._dynamo.test_case
+
 from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.utils import counters
@@ -14,6 +15,9 @@ from torch._inductor import config as inductor_config
 from torch.nn.attention.flex_attention import flex_attention, flex_attention_hop
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils._debug_mode import DebugMode
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch.utils.checkpoint import (
     checkpoint,
     CheckpointPolicy,
@@ -86,8 +90,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         with DebugMode() as debug_mode:
             result = fn(x, y)
@@ -114,8 +118,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         with DebugMode() as debug_mode:
             result = fn(x, y)
@@ -140,8 +144,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         with DebugMode() as debug_mode:
             result = fn(x, y)
@@ -163,8 +167,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         with DebugMode() as debug_mode:
             result = fn(x, y)
@@ -190,8 +194,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+        x = torch.randn(4, 4, device=device_type, requires_grad=True)
+        y = torch.randn(4, 4, device=device_type, requires_grad=True)
 
         # Clone for eager comparison
         x_eager = x.detach().clone().requires_grad_(True)
@@ -233,8 +237,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             c = b + x
             return c
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         with DebugMode() as debug_mode:
             result = fn(x, y)
@@ -269,7 +273,7 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn_false(x):
             return x + 1
 
-        x = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=device_type)
         _ = fn_true(x)
         _ = fn_false(x)
 
@@ -305,8 +309,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn_not_wrapped(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         # First function should be wrapped
         with DebugMode() as debug_mode1:
@@ -334,8 +338,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         # Clear all caches and counters
         counters.clear()
@@ -413,8 +417,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return torch.matmul(x, y)
 
-        x = torch.randn(4, 4, device="cuda")
-        y = torch.randn(4, 4, device="cuda")
+        x = torch.randn(4, 4, device=device_type)
+        y = torch.randn(4, 4, device=device_type)
 
         # Clear all caches and counters
         counters.clear()
@@ -506,9 +510,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             return flex_attention(q, k, v, score_mod=causal_score_mod)
 
         B, H, S, D = 2, 4, 128, 64
-        q = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
-        k = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
-        v = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
+        q = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+        k = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+        v = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
 
         # Test forward pass
         output = fn(q, k, v)
@@ -550,9 +554,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             return flex_attention(q, k, v, score_mod=score_mod)
 
         B, H, S, D = 2, 4, 128, 64
-        q = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
-        k = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
-        v = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
+        q = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+        k = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+        v = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
 
         # Test with wrapper enabled - should see inductor_compiled_code HOP
         with DebugMode() as debug_wrapped:
@@ -593,13 +597,13 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 
         B, H, S, D = 2, 4, 128, 64
         q = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         k = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         v = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
 
         # Forward and backward
@@ -656,9 +660,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             return fn
 
         B, H, S, D = 2, 4, 128, 64
-        q = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
-        k = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
-        v = torch.randn(B, H, S, D, device="cuda", dtype=torch.float16)
+        q = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+        k = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
+        v = torch.randn(B, H, S, D, device=device_type, dtype=torch.float16)
 
         # Clear all caches
         counters.clear()
@@ -739,13 +743,13 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 
         B, H, S, D = 2, 4, 128, 64
         q = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         k = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         v = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
 
         # Forward compiler: should see flex_attention_hop once
@@ -824,13 +828,13 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 
         B, H, S, D = 2, 4, 128, 64
         q = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         k = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         v = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
 
         # Forward compiler: should see flex_attention_hop once
@@ -909,8 +913,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             b = torch.relu(a)
             return b
 
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+        x = torch.randn(4, 4, device=device_type, requires_grad=True)
+        y = torch.randn(4, 4, device=device_type, requires_grad=True)
 
         # Clone for comparison
         x_eager = x.detach().clone().requires_grad_(True)
@@ -977,8 +981,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             a = inner_compiled_matmul(x, y)
             return torch.relu(a)
 
-        x = torch.randn(4, 4, device="cuda", requires_grad=True)
-        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+        x = torch.randn(4, 4, device=device_type, requires_grad=True)
+        y = torch.randn(4, 4, device=device_type, requires_grad=True)
 
         x_eager = x.detach().clone().requires_grad_(True)
         y_eager = y.detach().clone().requires_grad_(True)
@@ -1032,8 +1036,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             def fn(x, y):
                 return torch.matmul(x, y)
 
-            x = torch.randn(4, 4, device="cuda")
-            y = torch.randn(4, 4, device="cuda")
+            x = torch.randn(4, 4, device=device_type)
+            y = torch.randn(4, 4, device=device_type)
             expected = torch.matmul(x, y)
 
             result_without = fn(x, y)
@@ -1057,8 +1061,8 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             def fn2(x, y):
                 return torch.matmul(x, y)
 
-            x2 = torch.randn(4, 4, device="cuda")
-            y2 = torch.randn(4, 4, device="cuda")
+            x2 = torch.randn(4, 4, device=device_type)
+            y2 = torch.randn(4, 4, device=device_type)
             expected2 = torch.matmul(x2, y2)
 
             with DebugMode():
@@ -1103,13 +1107,13 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
 
         B, H, S, D = 2, 4, 128, 64
         q = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         k = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
         v = torch.randn(
-            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+            B, H, S, D, device=device_type, dtype=torch.float16, requires_grad=True
         )
 
         # Enable wrapping at the inductor config level so that flex_attention's

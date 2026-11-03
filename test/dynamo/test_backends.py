@@ -470,6 +470,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         # (each wrapper is its own resolution); it is read at fire time
         # (@property), so it can be set after construction.
         from functorch.compile import make_boxed_func
+
         from torch._dynamo.backends.common import aot_autograd
 
         calls = []
@@ -581,6 +582,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
 
     def test_aot_autograd_api(self):
         from functorch.compile import make_boxed_func
+
         from torch._dynamo.backends.common import aot_autograd
 
         backend_run = False
@@ -602,6 +604,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
     def test_aot_autograd_reentrant_bw_compiler(self):
         # re-entry with an already-wrapped bw_compiler must leave it untouched
         from functorch.compile import make_boxed_func
+
         from torch._dynamo.backends.common import aot_autograd
 
         def my_compiler(gm, example_inputs):
@@ -623,6 +626,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
     def test_aot_autograd_reentrant_serializable_bw_compiler(self):
         # re-entry must not re-wrap a SerializableAOTDispatchCompiler's compiler_fn
         from functorch.compile import make_boxed_func
+
         from torch._dynamo.backends.common import aot_autograd
         from torch._functorch._aot_autograd.schemas import (
             SerializableAOTDispatchCompiler,
@@ -830,6 +834,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
 
     def test_backend_graph_freeze(self):
         from functorch.compile import make_boxed_func
+
         from torch._dynamo.backends.common import aot_autograd
 
         backend_run = False

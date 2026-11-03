@@ -1595,7 +1595,7 @@ optim_db: list[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #133268 regarding dtype being None"),
-                "TestOptimRenewed",
+                "TestOptimCudaOnly",
                 "test_peak_memory_foreach",
             ),
             DecorateInfo(
