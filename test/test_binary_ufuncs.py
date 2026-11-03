@@ -1705,7 +1705,7 @@ class TestBinaryUfuncsDevice(TestCase):
                     isinstance(exponent, torch.Tensor)
                     and base.dim() == 0
                     and base.device.type == "cpu"
-                    and exponent.device.type in ["cuda", "xpu"]
+                    and exponent.device.type != "cpu"
                 ):
                     regex = (
                         f"Expected all tensors to be on the same device, "
