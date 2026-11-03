@@ -273,7 +273,7 @@ class ReportWriter:
             )
             self.file.write(report.line(record))
             self.file.flush()
-        self.rerun_numbers[nodeid] += 1
+            self.rerun_numbers[nodeid] += 1
 
     def pytest_sessionfinish(self, session: Session) -> None:
         if _disabled:
