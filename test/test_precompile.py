@@ -11315,7 +11315,10 @@ class TestPrecompileCustomOpRecording(TestCase):
 
     def test_an_unrecorded_op_warns_once_and_imports_the_frame_modules(self):
         op, qualname = self._op("in_main")
-        op._init_fn.__module__ = "__main__"
+        # As if defined in __main__: custom_op also recorded this module as the one
+        # registering the op's kernel, which is importable when pytest imports it.
+        callers = op._backend_fn_callers
+        op._init_fn.__module__ = callers["CompositeExplicitAutograd"] = "__main__"
         with self.assertLogs("torch._precompile", level="WARNING") as logs:
             line, name, _ = self._render_with_ops([(qualname, "")])
         self.assertEqual(line, f"CUSTOM_OP_MODULES = {(name,)!r}")
