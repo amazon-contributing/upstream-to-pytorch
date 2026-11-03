@@ -19113,13 +19113,13 @@ class Fanout(Function):
 
 seed = torch.ones((), requires_grad=True)
 getter_output = Getter.apply(seed)
-source = torch.ones((), device="cuda", requires_grad=True)
+source = torch.ones((), device=sys.argv[1], requires_grad=True)
 duplicated = source.clone()
 Fanout.apply(getter_output, duplicated, duplicated).backward()
 """
         try:
             subprocess.check_output(
-                [sys.executable, "-c", script],
+                [sys.executable, "-c", script, device],
                 stderr=subprocess.STDOUT,
                 cwd=os.path.dirname(os.path.realpath(__file__)),
                 timeout=20,
