@@ -469,7 +469,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            self.run_forward_backward(device_type)
+            self.run_forward_backward()
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
         stack_trace_list = []
         for e in compilation_events:
@@ -495,7 +495,7 @@ class TestDynamoTimed(TestCase):
 
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            self.run_forward_backward(device_type)
+            self.run_forward_backward()
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
 
         self.assertEqual(
@@ -511,7 +511,7 @@ class TestDynamoTimed(TestCase):
         import torch._dynamo.convert_frame as convert_frame
 
         self.warmup()
-        self.run_forward_backward(device_type)
+        self.run_forward_backward()
 
         # Dummy code object
         def sample_func():
