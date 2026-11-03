@@ -1110,8 +1110,9 @@ class TestTorchDeviceType(TestCase):
             small2 = torch.randn(*dims_small2, device=device).float()
             small2_expanded = small2.expand(*dims_full)
 
-        if small.device.type in ('cuda', 'xpu') and fn in ['map', 'map2']:
-            # map and map2 are not implemented on CUDA/XPU tensors
+        if small.device.type != 'cpu' and fn in ['map', 'map2']:
+            # map_ and map2_ only run on CPU tensors (torch/csrc/utils/tensor_apply.cpp),
+            # so skip them on every other device, CUDA and XPU included
             # https://github.com/intel/torch-xpu-ops/issues/5374
             return
 
