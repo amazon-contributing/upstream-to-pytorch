@@ -402,7 +402,7 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_set_keep_unsharded_storage(self):
         """Tests storage retention and recursion across state-dict resharding."""
-        device = torch.device(device_type.type, 0)
+        device = torch.device(device_type.type)
         model = nn.Sequential(nn.Linear(8, 8, device=device))
         fully_shard(model[0], reshard_after_forward=False)
         fully_shard(model, reshard_after_forward=False)
