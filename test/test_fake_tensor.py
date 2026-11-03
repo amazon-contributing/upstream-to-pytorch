@@ -3481,7 +3481,11 @@ class TestFakeTensorOperatorInvariants(TestCase):
 
         m = Module()
         input = torch.rand(2, 2)
-        gpu_device = torch.device(GPU_TYPE, 0)
+        # The accelerator the skip above checks for. GPU_TYPE is "cuda" for one that
+        # is not a GPU type (e.g. a PrivateUse1 backend); FakeTensorMode then runs
+        # the real _to_copy to cuda as constant propagation, which needs CUDA.
+        acc = torch.accelerator.current_accelerator()
+        gpu_device = torch.device(acc.type if acc is not None else GPU_TYPE, 0)
 
         with FakeTensorMode(allow_non_fake_inputs=True):
             m.to(device=gpu_device)
