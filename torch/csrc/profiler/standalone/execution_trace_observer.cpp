@@ -453,24 +453,29 @@ convertIValue(
 
       if (isInput && at::isIntegralType(tensor.scalar_type(), false) &&
           tensor.numel() != 0) {
-        enableRecordFunction(false);
+        // Optional capture must not interrupt input metadata or stack
+        // bookkeeping.
+        try {
+          at::DisableRecordFunctionGuard guard;
+          if (ob.nodeListForSavingIntegerTensor.contains(functionName) &&
+              !ob.resourceDir.empty()) {
+            std::string tensor_dump_file_name = ob.resourceDir + "/nid_" +
+                std::to_string(opId) + "_tid_" + std::to_string(tensorIndex) +
+                ".dat";
+            auto tensor_on_host = tensor.cpu();
+            dumpTensorData2File(tensor_dump_file_name, tensor_on_host);
+          }
 
-        if (ob.nodeListForSavingIntegerTensor.contains(functionName) &&
-            !ob.resourceDir.empty()) {
-          std::string tensor_dump_file_name = ob.resourceDir + "/nid_" +
-              std::to_string(opId) + "_tid_" + std::to_string(tensorIndex) +
-              ".dat";
-          auto tensor_on_host = tensor.cpu();
-          dumpTensorData2File(tensor_dump_file_name, tensor_on_host);
+          if (ob.record_integral_tensor_range) {
+            auto [min_t, max_t] = tensor.aminmax();
+            tensor_index_min_max_map[tensorIndex] =
+                std::make_pair(min_t.item<int64_t>(), max_t.item<int64_t>());
+          }
+        } catch (const std::exception& e) {
+          LOG(WARNING)
+              << "Exception in execution trace observer while capturing "
+              << "integral input: " << e.what();
         }
-
-        if (ob.record_integral_tensor_range) {
-          auto [min_t, max_t] = tensor.aminmax();
-          tensor_index_min_max_map[tensorIndex] =
-              std::make_pair(min_t.item<int64_t>(), max_t.item<int64_t>());
-        }
-
-        enableRecordFunction(true);
       }
     }
     tensorIndex++;
