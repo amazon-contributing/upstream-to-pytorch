@@ -2364,7 +2364,7 @@ class TestIndexingDevice(TestCase):
         elif device_type == "xpu":
             sm = dp.gpu_subslice_count
         else:
-            raise RuntimeError(f"Unsupported device type {device_type}")
+            self.skipTest(f"the regression shape is sized by the CUDA/XPU SM count; {device_type} has none")
 
         # D=8 fp32 -> chunk_bytes=32 (< 128). M_src > sm*64 forces every
         # CTA into >= 2 iterations -> stage 1 used. Prod fault was at
