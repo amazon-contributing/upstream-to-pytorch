@@ -2907,9 +2907,16 @@ class <lambda>(torch.nn.Module):
         x = torch.ones(2, device=device)
         s = torch.Stream(device=device)
         compiled = torch.compile(fn, backend=backend, fullgraph=True)
-        self.assertEqual(compiled(x, s), fn(x, s))
+
+        # An eager call of fn reads y on s, and nothing orders s after the
+        # current stream that wrote y. Compute the values on the current stream.
+        expected = (x + 1) * 2
+        self.assertEqual(
+            compiled(x, s),
+            (expected, torch.accelerator.current_stream(device).stream_id),
+        )
         with torch.Stream(device=device) as other:
-            self.assertEqual(compiled(x, s), fn(x, s))
+            self.assertEqual(compiled(x, s), (expected, other.stream_id))
             self.assertEqual(compiled(x, s)[1], other.stream_id)
 
     def test_recorded_events_append_runtime_objects(self, device):
