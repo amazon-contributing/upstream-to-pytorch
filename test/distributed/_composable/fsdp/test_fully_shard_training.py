@@ -280,7 +280,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(4, allow_cpu=True)
     def test_keep_unsharded_storage_with_post_forward_reshard(self):
         """Tests storage retention when resharding to a smaller mesh."""
-        device = torch.device(device_type.type, 0)
+        device = torch.device(device_type.type)
         model = nn.Linear(8, 8, device=device)
         fully_shard(model, reshard_after_forward=2)
         model.set_keep_unsharded_storage(True)
