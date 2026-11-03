@@ -72,7 +72,7 @@ class TestReplicateForwardInputs(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_root_move_forward_input_to_device(self):
-        device0 = torch.device(device.type, 0)
+        device0 = torch.device(device.type, self.rank)
 
         class ParamlessModule(nn.Module):
             def forward(self, x: torch.Tensor, ys: tuple[torch.Tensor, ...]):
@@ -105,7 +105,7 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_param_registration_after_forward(self):
         """Tests the parameter registration after forward."""
-        device0 = torch.device(device.type, 0)
+        device0 = torch.device(device.type, self.rank)
         # Single Replicate group
         torch.manual_seed(42)
         model = MLP(3, device0)
@@ -154,7 +154,7 @@ class TestReplicateRegisteredParams(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
-        device0 = torch.device(device.type, 0)
+        device0 = torch.device(device.type, self.rank)
         # Single Replicate group
         model = MLP(8, device0)
         replicate(model)  # root only
