@@ -1037,7 +1037,7 @@ class TestOptimRenewed(TestCase):
 
     @onlyAccelerator
     @skipMPS
-    @largeTensorTest("72GB", "cuda")
+    @largeTensorTest("72GB")
     @serialTest()
     @optims(
         [optim for optim in optim_db if "foreach" in optim.supported_impls],
