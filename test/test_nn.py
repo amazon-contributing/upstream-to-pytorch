@@ -7919,7 +7919,9 @@ class TestNNDeviceType(NNTestCase):
         out_cpu = torch.nn.functional.layer_norm(x.cpu(), [N], None, bias_cpu, eps)
         out_cpu.backward(grad_out.cpu())
 
-        self.assertEqual(bias.grad.cpu(), bias_cpu.grad, f"M={M} N={N}", atol=1e-4, rtol=1e-4)
+        # dbeta sums all M rows. For M >= 2048 the summation order differs from the
+        # CPU reference's, so use the 1e-3 that the dispatch band tests use there.
+        self.assertEqual(bias.grad.cpu(), bias_cpu.grad, f"M={M} N={N}", atol=1e-3, rtol=1e-3)
 
     def test_layer_norm_grads_with_create_graph_flag(self, device):
         atol = 1e-5
