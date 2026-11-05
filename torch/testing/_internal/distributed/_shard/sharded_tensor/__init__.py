@@ -26,7 +26,11 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         # backend registered by an out-of-tree device is accepted the same way
         # the built-in ones are.
         if not dist.is_backend_available(backend):
-            raise RuntimeError(f"Backend {backend} not supported!")
+            if torch.accelerator.is_available():
+                device_type = torch.accelerator.current_accelerator().type
+                backend = dist.Backend.default_device_backend_map[device_type]
+            else:
+                raise RuntimeError(f"Backend {backend} not supported!")
 
         dist.init_process_group(
             backend=backend,

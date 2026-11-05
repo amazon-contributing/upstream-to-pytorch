@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     TEST_CUDA,
     TEST_HPU,
+    TEST_PRIVATEUSE1,
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TEST_XPU,
@@ -150,7 +151,7 @@ logger.setLevel(logging.INFO)
 
 ACCELERATOR_DIST_BACKENDS = ["nccl", "xccl", "hccl"]
 DDP_RANK_DEVICES = ["cuda", "xpu"]
-HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU
+HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1
 
 
 class TestSkip(NamedTuple):
@@ -209,7 +210,6 @@ class DistTestCases:
 def requires_ddp_rank(device):
     return device in DDP_RANK_DEVICES
 
-
 def skip_if_no_gpu(func):
     """Skips if the world size exceeds the number of devices, ensuring that if the
     test is run, each rank has its own device via``torch.accelerator.set_device_index(rank)``."""
@@ -220,6 +220,23 @@ def skip_if_no_gpu(func):
             sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
         world_size = int(os.environ["WORLD_SIZE"])
         if torch.accelerator.device_count() < world_size:
+            sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def skip_if_no_accelerator(func):
+    """Skips if the world size exceeds the number of devices, ensuring that if the
+    test is run, each rank has its own device via ``torch.accelerator.device_index(rank)``."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not (TEST_PRIVATEUSE1):
+            sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
+        world_size = int(os.environ["WORLD_SIZE"])
+        if TEST_PRIVATEUSE1 and torch.accelerator.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
 
         return func(*args, **kwargs)
@@ -579,6 +596,9 @@ def requires_accelerator_dist_backend(backends=None):
     Args:
         backends (Optional[List[str]]): Specific accelerator backends to check (e.g., ["nccl", "xccl", "hccl"]).
                                        If None, checks all supported accelerator backends (NCCL, XCCL, HCCL).
+                                       Names outside that set are resolved through the c10d registry, and a
+                                       registered PrivateUse1 backend satisfies the check on its own, so
+                                       PrivateUse1 backends are supported whether or not they are named.
 
     Returns:
         callable: A decorator that skips the test if no specified accelerator backend is available.
@@ -586,14 +606,30 @@ def requires_accelerator_dist_backend(backends=None):
     if backends is None:
         backends = ACCELERATOR_DIST_BACKENDS
 
+    # In-tree backends need an explicit check because being registered does not
+    # mean the build supports them. Any other name resolves through the c10d
+    # registry, enabling PrivateUse1 backends. Requires an accelerator to be
+    # present, so a CPU-only host is not mistaken for having one.
+    checks = {
+        "nccl": c10d.is_nccl_available,
+        "xccl": c10d.is_xccl_available,
+        "hccl": lambda: TEST_HPU,
+    }
+    has_accelerator = torch.accelerator.current_accelerator() is not None
+
+    def _is_privateuse1_backend_available() -> bool:
+        """Check if a PrivateUse1 backend is registered."""
+        pu1_device = torch._C._get_privateuse1_backend_name()
+        return c10d.Backend.default_device_backend_map.get(pu1_device) is not None
+
+    # A registered PrivateUse1 backend satisfies the check on its own, so call
+    # sites that still hardcode in-tree names keep running on PrivateUse1.
     backend_available = any(
-        {
-            "nccl": c10d.is_nccl_available,
-            "xccl": c10d.is_xccl_available,
-            "hccl": lambda: TEST_HPU,
-        }.get(backend, lambda: False)()
+        checks[backend]()
+        if backend in checks
+        else has_accelerator and c10d.is_backend_available(backend)
         for backend in backends
-    )
+    ) or _is_privateuse1_backend_available()
 
     return skip_but_pass_in_sandcastle_if(
         not backend_available,
@@ -776,6 +812,16 @@ def create_device(interface=None, lazy_init: bool = False):
         return c10d.ProcessGroupGloo.create_device(
             interface=interface, lazy_init=lazy_init
         )
+
+
+def _is_bf16_supported():
+    if torch.accelerator.is_available():
+        device_module = torch.get_device_module(torch.accelerator.current_accelerator())
+        return getattr(device_module, "is_bf16_supported", lambda: False)()
+    return False
+
+
+BFLOAT16_AVAILABLE = _is_bf16_supported()
 
 
 def get_timeout(test_id) -> int:
@@ -1032,6 +1078,7 @@ class MultiProcessTestCase(TestCase):
                 ),
                 kwargs={
                     "fake_pg": getattr(self, "fake_pg", False),
+                    "world_size": self.world_size,
                 },
             )
             process.start()
@@ -1232,6 +1279,18 @@ class MultiProcessTestCase(TestCase):
             for pipe in self.pid_to_pipe.values():
                 pipe.close()
 
+    def _kill_surviving_processes(self):
+        """Terminate and kill any processes that haven't exited yet."""
+        for p in self.processes:
+            if p.exitcode is None:
+                p.terminate()
+        for p in self.processes:
+            if p.exitcode is None:
+                p.join(timeout=5)
+                if p.exitcode is None:
+                    p.kill()
+                    p.join(timeout=5)
+
     def _check_return_codes(self, fn, elapsed_time) -> None:
         """
         Checks that the return codes of all spawned processes match, and skips
@@ -1266,9 +1325,11 @@ class MultiProcessTestCase(TestCase):
                     f"and exception:\n{error_message}\n"
                 )
 
+            self._kill_surviving_processes()
             raise RuntimeError(error)
         # If no process exited uncleanly, we check for timeouts, and then ensure
         # each process exited cleanly.
+        self._kill_surviving_processes()
         for i, p in enumerate(self.processes):
             if p.exitcode is None:
                 raise RuntimeError(
@@ -1335,14 +1396,8 @@ class DistributedTestBase(MultiProcessTestCase):
             pass
 
     def backend(self, device) -> str:
-        if "cuda" in device:
-            return "nccl"
-        elif "hpu" in device:  # intel gaudi
-            return "hccl"
-        elif "xpu" in device:
-            return "xccl"
-        else:
-            return "gloo"
+        device_type = torch.device(device).type if isinstance(device, str) else device.type
+        return c10d.Backend.default_device_backend_map.get(device_type, "gloo")
 
     def create_pg(self, device, world_size=None, backend=None):
         if world_size is None:
@@ -1350,24 +1405,14 @@ class DistributedTestBase(MultiProcessTestCase):
         backend = backend or self.backend(device)
         num_visible_devices = torch.get_device_module(device).device_count()
         store = torch.distributed.FileStore(self.file_name, num_visible_devices)
-        if "nccl" in backend or "xccl" in backend:
-            accelerator = torch.accelerator.current_accelerator()
-            if accelerator:
-                device_type = accelerator.type
-                device = torch.device(f"{device_type}:{self.rank}")
-                torch.set_default_device(device)
-                torch.accelerator.set_device_index(device)
-            else:
-                raise RuntimeError(
-                    "Expected to find an accelerator when initializing process group"
-                    f" with {backend} backend, but got None"
-                )
         torch.distributed.init_process_group(
             backend=backend,
             world_size=world_size,
             rank=self.rank,
             store=store,
         )
+        if backend in ACCELERATOR_DIST_BACKENDS:
+            torch.accelerator.set_device_index(self.rank)
         return torch.distributed.distributed_c10d._get_default_group()
 
     def rank_to_device(self, device):
@@ -1896,6 +1941,13 @@ class MultiProcContinuousTest(TestCase):
     poison_pill: bool = False
     # Flag for lazy process spawning (to support instantiate_device_type_tests)
     _processes_spawned: bool = False
+    # How long tearDownClass waits for all workers to exit after their shutdown
+    # sentinels before escalating to terminate()/kill(). Shared by every rank, not
+    # per rank. Teardown is a queue sentinel plus process exit, so only a wedged
+    # worker should reach this.
+    TEARDOWN_JOIN_TIMEOUT: int = 120
+    # Grace period after each escalation signal, again shared by every rank.
+    TEARDOWN_KILL_GRACE: int = 10
 
     @classmethod
     def backend_str(cls) -> str | None:
@@ -2177,9 +2229,36 @@ class MultiProcContinuousTest(TestCase):
         for task_queue in cls.task_queues:
             task_queue.put(None)
 
-        # Wait for all workers to exit
+        # Wait for all workers to exit, but do not wait forever. A worker wedged
+        # inside a collective (or otherwise stuck) never consumes its sentinel and
+        # never exits, and an unbounded join() here turns that into a hang of the
+        # whole test process rather than a reported failure. A collective wedges
+        # every rank at once, so the timeout is one deadline shared by all workers.
+        sentinel_sent = time.time()
+        deadline = sentinel_sent + cls.TEARDOWN_JOIN_TIMEOUT
         for process in cls.processes:
-            process.join()
+            process.join(max(0, deadline - time.time()))
+
+        for escalate, signal_name in (
+            (lambda p: p.terminate(), "SIGTERM"),
+            (lambda p: p.kill(), "SIGKILL"),
+        ):
+            survivors = [
+                (rank, p) for rank, p in enumerate(cls.processes) if p.is_alive()
+            ]
+            if not survivors:
+                break
+            logger.warning(
+                "Ranks %s still alive %ss after the shutdown sentinel; sending %s",
+                [rank for rank, _ in survivors],
+                int(time.time() - sentinel_sent),
+                signal_name,
+            )
+            for _, process in survivors:
+                escalate(process)
+            grace_deadline = time.time() + cls.TEARDOWN_KILL_GRACE
+            for _, process in survivors:
+                process.join(max(0, grace_deadline - time.time()))
 
         # Clear up the rendezvous file
         try:
@@ -2350,3 +2429,4 @@ class C10dTorchCommsTestBase(MultiProcContinuousTest):
     def rank_to_device(self, device):
         num_visible_devices = torch.get_device_module(device).device_count()
         return {i: [i % num_visible_devices] for i in range(self.world_size)}
+

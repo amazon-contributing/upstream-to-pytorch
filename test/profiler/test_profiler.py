@@ -74,6 +74,9 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
+    TEST_CUDA,
+    TEST_PRIVATEUSE1,
+    TEST_XPU,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -81,6 +84,12 @@ from torch.testing._internal.common_utils import (
 
 if TYPE_CHECKING:
     from torch.autograd.profiler_util import FunctionEvent
+
+device_type = (
+    torch.accelerator.current_accelerator().type
+    if torch.accelerator.is_available()
+    else "cpu"
+)
 
 
 def get_profiler_activities(device_type):

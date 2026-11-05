@@ -22,6 +22,9 @@ from torch.testing._internal.common_device_type import (
 )
 
 
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 def checkpoint_wrapper(fn):
     def inner(*args):
         return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
@@ -300,7 +303,7 @@ class AnnotateTestsDevice(torch._dynamo.test_case.TestCase):
             a * b,
             b,
             dtype=torch.bfloat16,
-            device=device,
+            device=device_type,
             requires_grad=True,
         )
 

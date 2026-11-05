@@ -806,12 +806,12 @@ class TestStateDictStager(TestCase):
                 # Verify pinned memory status
                 self.assertEqual(
                     cpu_tensor1.is_pinned(),
-                    pin_memory,
+                    stager.pin_memory,
                     lambda msg: f"{msg}\nTensor pinned status should be {pin_memory}",
                 )
                 self.assertEqual(
                     cpu_tensor2.is_pinned(),
-                    pin_memory,
+                    stager.pin_memory,
                     lambda msg: f"{msg}\nTensor pinned status should be {pin_memory}",
                 )
 
@@ -963,7 +963,10 @@ class TestReplicationStager(DTensorContinuousTestBase):
 
     @classmethod
     def backend_str(cls) -> str:
-        return "cpu:gloo,cuda:nccl"
+        if device_type == "cpu":
+            return "cpu:gloo"
+        acc_backend = dist.get_default_backend_for_device(device_type)
+        return f"cpu:gloo,{device_type}:{acc_backend}"
 
     def _create_simple_state_dict(self, rank: int) -> dict:
         """

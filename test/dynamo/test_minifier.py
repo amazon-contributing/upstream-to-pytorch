@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import tempfile
+import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -11,6 +12,14 @@ from torch._dynamo.test_minifier_common import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import set_cwd, skipIfNNModuleInlined
+
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+requires_gpu = unittest.skipUnless(
+    torch.cuda.is_available() or torch.xpu.is_available(), "requires cuda or xpu"
+)
 
 
 class MinifierTests(MinifierTestBase):

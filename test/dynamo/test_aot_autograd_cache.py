@@ -27,6 +27,7 @@ import torch._inductor.compile_fx as compile_fx
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch._functorch._aot_autograd.autograd_cache import (
     _CanonicalSetMetadata,
     AOTAutogradCache,
@@ -865,7 +866,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
     @functorch_config.patch({"enable_autograd_cache": True})
     @functorch_config.patch({"strict_autograd_cache": True})
     @unittest.skipIf(not HAS_ACCELERATOR, "requires accelerator")
-    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
+    @unittest.skipIf(not torch.accelerator.is_available(), "CUDA is unavailable")
     @requires_triton()
     def test_non_bundled_to_bundled_config_change(self):
         if functorch_config.bundled_autograd_cache:
@@ -2215,7 +2216,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
     @unittest.skipIf(not HAS_ACCELERATOR, "requires accelerator")
     @unittest.skipIf(not ACC_SUPPORTS_BF16, "requires bfloat16/float8 support")
-    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
+    @unittest.skipIf(not torch.accelerator.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -2320,7 +2321,7 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
 
     @unittest.skipIf(not HAS_ACCELERATOR, "requires accelerator")
     @unittest.skipIf(not ACC_SUPPORTS_BF16, "requires bfloat16/float8 support")
-    @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "GPU is unavailable")
+    @unittest.skipIf(not torch.accelerator.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not SM80OrLater, "bfloat16, float8")
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)

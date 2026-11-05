@@ -24,7 +24,7 @@ from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import find_free_port
 from torch.testing._internal.inductor_utils import HAS_XPU_AND_TRITON
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu_and_triton
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
@@ -32,6 +32,9 @@ device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else 
 
 if torch.distributed.is_available():
     from torch.testing._internal.distributed.fake_pg import FakeStore
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 HAS_TLPARSE = shutil.which("tlparse") is not None
 requires_tlparse = unittest.skipUnless(HAS_TLPARSE, "requires tlparse")
@@ -370,9 +373,9 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
-    @requires_gpu_and_triton
-    def test_gpugraphs(self):
-        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
+    @requires_cuda_and_triton
+    def test_cudagraphs(self):
+        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
         fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertExpectedInline(
             self.buffer.getvalue(),

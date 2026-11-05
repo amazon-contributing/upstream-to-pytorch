@@ -20,10 +20,8 @@ class SimpleKinetoInitializationTest(TestCase):
         device_type = device.split(":")[0]
         script = f"""
 import torch
-if torch.{device_type}.is_available():
-    device_module = torch.{device_type}
-    if hasattr(device_module, 'init'):
-        device_module.init()
+if torch.accelerator.is_available():
+    torch.accelerator.set_device_index(0)
 """
         try:
             subprocess.check_output(

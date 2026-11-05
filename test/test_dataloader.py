@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     slowTest,
     TEST_CUDA,
     TEST_NUMPY,
+    TEST_PRIVATEUSE1,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
     TestCase,
@@ -104,9 +105,12 @@ TEST_CUDA_IPC = (
     #    and not TEST_WITH_ROCM
 )  # https://github.com/pytorch/pytorch/issues/90940
 
-# pin_memory requires an accelerator with a pinned memory allocator.
-# MPS reports as available but does not support pin_memory (see
-# https://github.com/pytorch/pytorch/issues/86060), so exclude it.
+TEST_PRIVATEUSE1_IPC = (
+    TEST_PRIVATEUSE1
+    and sys.platform != "darwin"
+    and sys.platform != "win32"
+)
+
 TEST_PIN_MEMORY = torch.accelerator.is_available() and not (
     (acc := torch.accelerator.current_accelerator()) is not None and acc.type == "mps"
 )
@@ -2969,7 +2973,7 @@ class TestDataLoaderDevice(TestCase):
         "context",
         [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
     )
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_PRIVATEUSE1_IPC), "CUDA/PrivateUse1 IPC not available")
     def test_nested_tensor_multiprocessing(self, device, context):
         # The 'fork' multiprocessing context doesn't work for CUDA so skip it
         if "cuda" in device and context == "fork":
@@ -3018,7 +3022,7 @@ class TestDataLoaderDevice(TestCase):
         "context",
         [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
     )
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_PRIVATEUSE1_IPC), "CUDA/PrivateUse1 IPC not available")
     def test_sparse_tensor_multiprocessing(self, device, context):
         # The 'fork' multiprocessing context doesn't work for CUDA so skip it
         if "cuda" in device and context == "fork":
@@ -3526,7 +3530,7 @@ class TestDataLoaderCUDA(TestCase):
         kwargs["persistent_workers"] = persistent_workers
         return DataLoader(dataset, **kwargs)
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_PRIVATEUSE1_IPC), "CUDA/PrivateUse1 IPC not available")
     def test_multiple_dataloaders(self):
         for multiprocessing_context in supported_multiprocessing_contexts:
             loader1_it = iter(self._get_data_loader(self.dataset, num_workers=1))
@@ -3546,7 +3550,7 @@ class TestDataLoaderCUDA(TestCase):
             del loader1_it
             del loader2_it
 
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_PRIVATEUSE1_IPC), "CUDA/PrivateUse1 IPC not available")
     def test_multiprocessing_contexts(self):
         reference = [
             torch.arange(3),
@@ -3634,13 +3638,13 @@ class TestDataLoaderCUDA(TestCase):
                 )
 
     @skipIfNoNumpy
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_PRIVATEUSE1_IPC), "CUDA/PrivateUse1 IPC not available")
     def test_multiprocessing_iterdatapipe(self):
         self._test_multiprocessing_iterdatapipe(with_dill=False)
 
     @unittest.expectedFailure
     @skipIfNoNumpy
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_PRIVATEUSE1_IPC), "CUDA/PrivateUse1 IPC not available")
     @skipIfNoDill
     def test_multiprocessing_iterdatapipe_with_dill(self):
         self._test_multiprocessing_iterdatapipe(with_dill=True)

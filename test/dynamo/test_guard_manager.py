@@ -20,11 +20,15 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_cuda,
     set_default_dtype,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
 )
 
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 RootGuardManager = guards.RootGuardManager
 DictGuardManager = guards.DictGuardManager
@@ -596,6 +600,8 @@ user_stack=None)
         del x
         self.assertFalse(guard(weakref_x()))
 
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    @requires_cuda
     def test_call_function_no_args_guard(self):
         if not torch.accelerator.is_available():
             self.skipTest("Accelerator is not available")

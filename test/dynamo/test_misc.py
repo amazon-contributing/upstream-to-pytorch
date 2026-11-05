@@ -51,7 +51,9 @@ from torch._dynamo.decorators import _DimRange
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 from torch._dynamo.testing import (
+
     CompileCounter,
     CompileCounterWithBackend,
     expectedFailureDynamic,
@@ -370,8 +372,8 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
             return cumsum.sum()
 
-        a = torch.rand(100, 30, device="cuda")
-        b = torch.rand(100, 30, device="cuda")
+        a = torch.rand(100, 30, device=device_type)
+        b = torch.rand(100, 30, device=device_type)
 
         torch._dynamo.decorators.mark_unbacked(a, 0)
         torch._dynamo.decorators.mark_unbacked(a, 1)
@@ -871,9 +873,9 @@ graph():
             res = torch.add(a, b, out=out)
             return res
 
-        res = add_fn(2, 3, torch.tensor(0.0))
+        res = add_fn(2, 3, torch.tensor(0.0, device=device_type))
         add_fn = torch.compile(add_fn, backend="eager", fullgraph=True)
-        res_compiled = add_fn(2, 3, torch.tensor(0.0))
+        res_compiled = add_fn(2, 3, torch.tensor(0.0, device=device_type))
         self.assertEqual(res, res_compiled)
 
     def test_callpacked(self):
@@ -1217,7 +1219,7 @@ graph():
             return y
 
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
-        x = torch.ones(5)
+        x = torch.ones(5, device=device_type)
 
         res = opt_f(x)
         ref = f(x)
@@ -1326,7 +1328,7 @@ graph():
             )
 
     @unittest.skipIf(
-        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
+        not torch.accelerator.is_available() or not (hasattr(torch.cuda, 'get_device_capability') and torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0)),
         "requires Hopper+ (SM >= 9.0) for TMA",
     )
     @unittest.skipIf(
@@ -1384,7 +1386,7 @@ graph():
             )
             return out
 
-        x = torch.randn(M, N, device="cuda")
+        x = torch.randn(M, N, device=device_type)
 
         from contextlib import contextmanager
 
@@ -1402,7 +1404,7 @@ graph():
         def fn_with_set_allocator(x):
             triton.set_allocator(
                 lambda size, alignment, stream: torch.empty(
-                    size, device="cuda", dtype=torch.int8
+                    size, device=device_type, dtype=torch.int8
                 )
             )
             return run_kernel(x)
@@ -4918,9 +4920,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         shapes = [(2, 1), (6, 1), (4, 1)]
         for shape in shapes:
             vec1, vec2 = shape
-            input_tensor1 = torch.randn(vec1)
-            input_tensor2 = torch.randn(vec2)
-            out_tensor = torch.empty(shape)
+            input_tensor1 = torch.randn(vec1, device=device_type)
+            input_tensor2 = torch.randn(vec2, device=device_type)
+            out_tensor = torch.empty(shape, device=device_type)
             args = {"input": input_tensor1, "vec2": input_tensor2, "out": out_tensor}
             res = compile_fn(args)
             opt_res = res.clone()  # cuz this is out and we mutate it
@@ -8909,14 +8911,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertLogs(logger="torch._dynamo", level=logging.DEBUG) as log,
             torch._dynamo.config.patch(verbose=True),
         ):
-            f1(torch.randn(10), torch.randn(10))
+            f1(torch.randn(10, device=device_type), torch.randn(10, device=device_type))
             self.assertGreater(count_graph_break_msgs(log.output), 1)
 
         with (
             self.assertLogs(logger="torch._dynamo", level=logging.DEBUG) as log,
             torch._dynamo.config.patch(verbose=False),
         ):
-            g1(torch.randn(10), torch.randn(10))
+            g1(torch.randn(10, device=device_type), torch.randn(10, device=device_type))
             self.assertEqual(count_graph_break_msgs(log.output), 1)
 
         # reset logging state
@@ -15020,8 +15022,8 @@ def ___make_guard_fn():
                     l[i] = t * x
                 return itertools.accumulate(l, builtin_op)
 
-            t_list = [torch.tensor([i + 1]) for i in range(4)]
-            x = torch.tensor([[1, 2], [3, 4]])
+            t_list = [torch.tensor([i + 1], device=device_type) for i in range(4)]
+            x = torch.tensor([[1, 2], [3, 4]], device=device_type)
             eager = fn(*t_list, x)
 
             compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -15899,7 +15901,7 @@ ShapeEnv not equal: field values don't match:
             [True, False], [True, False]
         ):
             torch.use_deterministic_algorithms(forward_deterministic)
-            a = torch.randn(10, requires_grad=True)
+            a = torch.randn(10, requires_grad=True, device=device_type)
             res = func(a, 1)
             grad = torch.ones_like(res)
             torch.use_deterministic_algorithms(backward_deterministic)
@@ -17153,16 +17155,16 @@ fn
             x.grad.add_(y)
             return torch.abs(y)
 
-        y = torch.arange(4).reshape(2, 2).to(torch.float)
-        x = torch.randn(2, 2)
+        y = torch.arange(4, device=device_type).reshape(2, 2).to(torch.float)
+        x = torch.randn(2, 2, device=device_type)
         x.grad = None
 
         z = fn(x, y)
         ref_y = torch.clone(z).detach()
         ref_x_grad = torch.clone(x.grad).detach()
 
-        y = torch.arange(4).reshape(2, 2).to(torch.float)
-        x = torch.randn(2, 2)
+        y = torch.arange(4, device=device_type).reshape(2, 2).to(torch.float)
+        x = torch.randn(2, 2, device=device_type)
         x.grad = None
 
         opt_fn = torch.compile(fn, backend="eager")
@@ -18635,7 +18637,7 @@ fn
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
     def test_new_tensor_break(self):
-        a = torch.tensor([1, 0, 0, 5])
+        a = torch.tensor([1, 0, 0, 5], device=device_type)
 
         cases = {
             "scalar": lambda a: a.new_tensor([a.nonzero().squeeze(-1).numel()]),
@@ -19026,7 +19028,7 @@ with torch.library._scoped_library("mylib_ci", "FRAGMENT") as lib:
             x.requires_grad_()
             return (x * 2).sum()
 
-        x_ref = torch.randn(3, 3)
+        x_ref = torch.randn(3, 3, device=device_type)
         x_test = x_ref.clone()
 
         fn(x_ref).backward()
@@ -19159,11 +19161,11 @@ def forward(self, L_x_ : torch.Tensor):
             h = x * 2 + 1
             x_detached = h.detach().requires_grad_()
             chunksz = x_detached.shape[0] // 2
-            total_loss = torch.tensor(0.0)
+            total_loss = torch.tensor(0.0, device=x.device)
             for start in range(0, x_detached.shape[0], chunksz):
                 chunk = x_detached[start : start + chunksz]
                 chunk_targets = targets[start : start + chunksz]
-                logits = chunk @ torch.eye(chunk.shape[-1])
+                logits = chunk @ torch.eye(chunk.shape[-1], device=chunk.device)
                 loss = torch.nn.functional.cross_entropy(logits, chunk_targets)
                 loss.backward()
                 total_loss = total_loss + loss.detach()
@@ -19171,8 +19173,8 @@ def forward(self, L_x_ : torch.Tensor):
             h.backward(x_detached.grad)
             return x.grad, total_loss
 
-        x_ref = torch.randn(4, 8, requires_grad=True)
-        targets = torch.randint(0, 8, (4,))
+        x_ref = torch.randn(4, 8, requires_grad=True, device=device_type)
+        targets = torch.randint(0, 8, (4,), device=device_type)
 
         x_test = x_ref.clone().detach().requires_grad_(True)
         ref_grad, ref_loss = fn(x_ref, targets)
@@ -20120,10 +20122,10 @@ class TestCustomFunction(torch.testing._internal.common_utils.TestCase):
             res.add_(1.0)
             return res.sum()
 
-        inp1_custom = torch.randn(4, 1, 2, requires_grad=True)
+        inp1_custom = torch.randn(4, 1, 2, requires_grad=True, device=device_type)
         inp1_usual = inp1_custom.detach().clone().requires_grad_(True)
 
-        inp2 = torch.randn(2, 4)
+        inp2 = torch.randn(2, 4, device=device_type)
         c_custom_func = torch.compile(outer_function, backend="eager")
         c_usual_func = torch.compile(usual_function, backend="eager")
 
@@ -20272,7 +20274,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             opt_fn2 = torch.compile(fn2, backend="eager", fullgraph=True)
             res = opt_fn2(x2)
 
-    @onlyCUDA
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @torch._dynamo.config.patch(recompile_limit=999)
     def test_legacy_cuda_tensor(self, device):
         typs = [
@@ -20470,9 +20472,9 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             result = x_bool * sentinel
             return result
 
-        x_true = torch.tensor([True], device=device)
-        x_false = torch.tensor([False], device=device)
-        sentinel = torch.tensor(2.0, requires_grad=True, device=device)
+        x_true = torch.tensor([True], device=device_type)
+        x_false = torch.tensor([False], device=device_type)
+        sentinel = torch.tensor(2.0, requires_grad=True, device=device_type)
         eager_result_true = symbool_mul_fn(x_true, sentinel)
         eager_result_false = symbool_mul_fn(x_false, sentinel)
         compiled_fn = torch.compile(
@@ -20497,9 +20499,9 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         compiled_guard_fn = torch.compile(
             symbool_guard_fn, backend="eager", dynamic=True
         )
-        a_true = torch.tensor(True, device=device)
-        a_false = torch.tensor(False, device=device)
-        b = torch.randn(6, device=device)
+        a_true = torch.tensor(True, device=device_type)
+        a_false = torch.tensor(False, device=device_type)
+        b = torch.randn(6, device=device_type)
         eager_res_true = symbool_guard_fn(a_true, b)
         compiled_res_true = compiled_guard_fn(a_true, b)
         self.assertEqual(eager_res_true, compiled_res_true)
@@ -20519,8 +20521,8 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
                 result = result.real
             return result
 
-        sentinel = torch.tensor(1.0, requires_grad=True, device=device)
-        arg_0 = torch.tensor([True], dtype=torch.bool, device=device)
+        sentinel = torch.tensor(1.0, requires_grad=True, device=device_type)
+        arg_0 = torch.tensor([True], dtype=torch.bool, device=device_type)
         args = (arg_0,) + (sentinel,)
         try:
             compiled_program = torch.compile(
@@ -20558,7 +20560,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
             compiled = torch.compile(container, backend="eager", fullgraph=True)
 
-            inp1 = torch.randn(4, 4, 4, device=device)
+            inp1 = torch.randn(4, 4, 4, device=device_type)
 
             compiled_result1 = compiled(inp1)
             eager_result1 = container_eager(inp1)
@@ -20579,13 +20581,13 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
                 self.to("cpu")
                 return x
 
-        mod = Model().to(device)
+        mod = Model().to(device_type)
         with torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False):
             fn = torch.compile(mod, backend="aot_eager", fullgraph=True)
-            x = torch.randn(10, 10, device=device)
+            x = torch.randn(10, 10, device=device_type)
             ref = fn(x)
             self.assertEqual(str(mod.fc.weight.device), "cpu")
-            mod.to(device)
+            mod.to(device_type)
             ref = fn(
                 x
             )  # second time compile runs, we should also move the module to cpu device
