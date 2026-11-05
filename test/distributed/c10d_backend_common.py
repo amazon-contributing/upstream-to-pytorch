@@ -118,6 +118,70 @@ C10D_BACKENDS = (
     ),
 )
 
+# The torch-neuronx c10d backend. It exists only when torch_neuronx registered
+# it (torch_neuronx/distributed/backend.py, _register_neuron_backend). A flag
+# is True only if NeuronBackend implements the feature; each False flag names
+# the missing feature.
+NEURON_BACKENDS = ()
+if dist.is_available() and dist.is_backend_available("neuron"):
+    NEURON_BACKENDS = (
+        BackendConfig(
+            "neuron",
+            "neuron",
+            # NeuronBackend.h:33 returns True for supportsCoalescing(), and
+            # allreduce_coalesced, allgather_into_tensor_coalesced and
+            # reduce_scatter_tensor_coalesced are implemented
+            # (NeuronBackend.cpp:1530, 1662, 1718). Between start/endCoalescing
+            # it queues only send/recv (NeuronBackend.cpp:539-541, 581-583).
+            supports_coalescing=True,
+            # False: BAND/BOR/BXOR are not supported. _reduce_scatter_base
+            # accepts only SUM, AVG, MIN, MAX, PREMUL_SUM
+            # (NeuronBackend.cpp:1042-1046).
+            supports_bitwise_reductions=False,
+            # True: the watchdog keeps each Work until it completes
+            # (NeuronBackend.cpp:388-392, NeuronWatchdog.cpp:77-83, 132-134).
+            supports_dropped_p2p_work=True,
+            # False: NeuronBackend.h does not override
+            # getSequenceNumberForGroup, so the c10d::Backend default throws.
+            supports_sequence_numbers=False,
+            # False: NeuronBackend.h does not override enableCollectivesTiming,
+            # and NeuronWork::getDuration requires timing (NeuronWork.cpp:187).
+            supports_collectives_timing=False,
+            # False: NeuronWork::getSequenceNumber (NeuronWork.h:251) does not
+            # override c10d::Work::getSequencenumber.
+            supports_work_sequence_number=False,
+            # False: NeuronWork does not override c10d::Work::getFutureResult.
+            supports_work_result=False,
+            # False: NeuronBackend.h does not override gather_single or
+            # gather_into_tensor.
+            supports_gather_single=False,
+            # False: allgather sizes its staging tensor from output_list[0]
+            # (NeuronBackend.cpp:989-991), so uneven outputs are not supported.
+            supports_uneven_all_gather=False,
+            # All standard dtypes are accepted. f32, f16, bf16, int32 and bool
+            # are used as is; f64 is cast to f32, and int64, int8 and uint8 to
+            # int32 (DispatchUtils.cpp:227-241, 357; copy-back at
+            # NeuronBackend.cpp:309-318).
+            dtypes=STANDARD_DTYPES,
+            # Empty: test_float8_transport reads the CUDA device capability.
+            # The backend casts float8 to f32 (DispatchUtils.cpp:236).
+            float8_dtypes=(),
+            # PREMUL_SUM multiplies the input by the factor, then runs SUM
+            # (NeuronBackend.cpp:781-789).
+            premul_sum_dtypes=(
+                torch.float16,
+                torch.float32,
+                torch.float64,
+                torch.bfloat16,
+            ),
+            # complex64 is used as is; complex128 is cast to complex64
+            # (DispatchUtils.cpp:227-229, 239-240).
+            complex_dtypes=COMPLEX_DTYPES,
+        ),
+    )
+
+C10D_BACKENDS += NEURON_BACKENDS
+
 CUDA_BACKENDS = tuple(
     backend for backend in C10D_BACKENDS if backend.device_type == "cuda"
 )
@@ -130,7 +194,7 @@ class C10dBackendTest:
 
     @property
     def device(self):
-        if self.device_type == "cuda":
+        if self.device_type != "cpu":
             return torch.device(self.device_type, self.rank)
         return torch.device(self.device_type)
 
@@ -159,6 +223,23 @@ class C10dBackendTest:
             store=store,
             timeout=timedelta(seconds=60),
         )
+        _set_accelerator_device_after_init(self.device_type, self.rank)
+
+
+def _set_accelerator_device_after_init(device_type, rank):
+    # CUDA sets the device before init_process_group. Other accelerators set
+    # it after: the Neuron backend requires that the Neuron runtime is not
+    # initialized before init_process_group (torch_neuronx/distributed/
+    # backend.py, _neuron_runtime_setup), and a device query can initialize it.
+    if device_type not in ("cpu", "cuda"):
+        torch.accelerator.set_device_index(rank)
+
+
+def _accelerator_device_count(device_type):
+    acc = torch.accelerator.current_accelerator()
+    if acc is None or acc.type != device_type:
+        return 0
+    return torch.accelerator.device_count()
 
 
 class C10dBackendTestContinuous:
@@ -173,8 +254,8 @@ class C10dBackendTestContinuous:
 
     @property
     def device(self):
-        if self.device_type == "cuda":
-            return torch.device("cuda", self.rank)
+        if self.device_type != "cpu":
+            return torch.device(self.device_type, self.rank)
         return torch.device(self.device_type)
 
     @classmethod
@@ -184,6 +265,7 @@ class C10dBackendTestContinuous:
         if cls.device_type == "cuda":
             torch.cuda.set_device(rank)
         super()._init_pg(rank, world_size, rdvz_file)
+        _set_accelerator_device_after_init(cls.device_type, rank)
 
     @classmethod
     def _run_test_given_id(cls, test_id, **kwargs):
@@ -236,5 +318,10 @@ def instantiate_backend_tests(
             test_class = unittest.skipIf(
                 not TEST_CUDA or torch.cuda.device_count() < 2,
                 f"{backend.name} requires 2+ GPUs",
+            )(test_class)
+        elif backend.device_type != "cpu":
+            test_class = unittest.skipIf(
+                _accelerator_device_count(backend.device_type) < 2,
+                f"{backend.name} requires 2+ {backend.device_type} devices",
             )(test_class)
         namespace[class_name] = test_class

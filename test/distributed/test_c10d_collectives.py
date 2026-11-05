@@ -831,6 +831,10 @@ class AbstractCollectivesTest(C10dBackendTest):
     def test_coalescing_window_covers_all_ops(self):
         if not self.supports_coalescing:
             self.skipTest(f"{self.backend_name} does not support coalescing")
+        if self.device_type != "cuda":
+            # The window uses CUDA streams. The Neuron backend also runs
+            # collectives at once inside a window; it queues only send/recv.
+            self.skipTest(f"{self.backend_name} coalescing window test requires CUDA")
         self._init_pg()
         store = dist.distributed_c10d._get_default_store()
         for async_op, p2p, side in itertools.product((False, True), repeat=3):
