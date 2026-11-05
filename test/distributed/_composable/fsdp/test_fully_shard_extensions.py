@@ -5,6 +5,7 @@ import copy
 import functools
 import math
 import threading
+import types
 from typing import Any
 
 import torch
@@ -406,8 +407,11 @@ class TestFullyShardAllGatherExtensionsMultiThread(
     def _test_release_all_gather_outputs_after_post_all_gather(
         self, reshard_after_forward: bool
     ):
-        tls = threading.local()
-        tls.num_post_all_gather_calls = 0
+        # On Neuron this class runs one process per rank
+        # (PYTORCH_TESTING_PREFER_MULTIPROCESS=1), and backward runs on the
+        # autograd device thread. A threading.local set here is not visible
+        # there, so count in a plain namespace.
+        tls = types.SimpleNamespace(num_post_all_gather_calls=0)
 
         def fsdp_pre_all_gather(
             self,
