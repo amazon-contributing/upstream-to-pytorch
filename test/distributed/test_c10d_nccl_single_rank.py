@@ -12,12 +12,30 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
 
-if not dist.is_available() or not dist.is_nccl_available():
-    print("c10d NCCL not available, skipping tests", file=sys.stderr)
+# Run on any accelerator whose default c10d backend implements PREMUL_SUM, not
+# only on CUDA. CUDA keeps the nccl-legacy backend of the upstream test.
+DEVICE_TYPE = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
+
+if (
+    not dist.is_available()
+    or DEVICE_TYPE == "cpu"
+    or (DEVICE_TYPE == "cuda" and not dist.is_nccl_available())
+):
+    print("No accelerator c10d backend available, skipping tests", file=sys.stderr)
     if __name__ == "__main__":
         sys.exit(0)
     # pytest imports this module with other test files. Skip only this module.
-    raise unittest.SkipTest("c10d NCCL not available")
+    raise unittest.SkipTest("No accelerator c10d backend available")
+
+BACKEND = (
+    "nccl-legacy"
+    if DEVICE_TYPE == "cuda"
+    else dist.get_default_backend_for_device(DEVICE_TYPE)
+)
 
 
 class ProcessGroupNCCLSingleRankTest(TestCase):
@@ -29,7 +47,7 @@ class ProcessGroupNCCLSingleRankTest(TestCase):
         self, device, dtype, collective, tensor_factor, async_op
     ):
         dist.init_process_group(
-            "nccl-legacy",
+            BACKEND,
             store=dist.HashStore(),
             rank=0,
             world_size=1,
@@ -71,7 +89,7 @@ class ProcessGroupNCCLSingleRankTest(TestCase):
 
 
 instantiate_device_type_tests(
-    ProcessGroupNCCLSingleRankTest, globals(), only_for="cuda"
+    ProcessGroupNCCLSingleRankTest, globals(), only_for=("cuda", DEVICE_TYPE)
 )
 
 
