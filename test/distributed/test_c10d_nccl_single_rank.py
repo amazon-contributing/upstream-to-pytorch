@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -13,7 +14,10 @@ from torch.testing._internal.common_utils import parametrize, run_tests, TestCas
 
 if not dist.is_available() or not dist.is_nccl_available():
     print("c10d NCCL not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    if __name__ == "__main__":
+        sys.exit(0)
+    # pytest imports this module with other test files. Skip only this module.
+    raise unittest.SkipTest("c10d NCCL not available")
 
 
 class ProcessGroupNCCLSingleRankTest(TestCase):
