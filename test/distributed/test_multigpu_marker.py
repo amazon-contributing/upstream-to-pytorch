@@ -15,6 +15,7 @@ import os
 import sys
 import tempfile
 import types
+import unittest
 from unittest.mock import patch
 
 from torch.testing._internal.common_distributed import (
@@ -31,6 +32,19 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 _TEST_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _TEST_ROOT not in sys.path:
     sys.path.insert(0, _TEST_ROOT)
+
+try:
+    import conftest as _conftest
+except ImportError:
+    _conftest = None
+
+if not hasattr(_conftest, "MultiGpuMinFilterPlugin"):
+    # A harness that replaces PyTorch's test/conftest.py with its own conftest
+    # (the torch-neuronx harness does) has no marker resolver. Skip only this
+    # module. Then the ImportError does not stop the collection of the node.
+    raise unittest.SkipTest(
+        "test/conftest.py is not PyTorch's: no multigpu marker resolver to test"
+    )
 
 from conftest import (
     _decorator_gpu_requirement,
