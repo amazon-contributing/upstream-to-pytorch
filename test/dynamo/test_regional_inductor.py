@@ -1742,7 +1742,7 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                     InvokeSubgraphCache.add_functionalize_schema_entry = (
                         lambda self, key, schema: None
                     )
-                x = torch.randn(8, requires_grad=True)
+                x = torch.randn(8, requires_grad=True, device=device_type)
                 opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", UserWarning)

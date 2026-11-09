@@ -1290,6 +1290,9 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak().to(device_type)
+        for mod in m.modules():
+            if isinstance(getattr(mod, "scale", None), torch.Tensor):
+                mod.scale = mod.scale.to(device_type)
         x = torch.rand([10, 10], device=device_type)
         ref = m(x)
         opt_m = torch.compile(m, backend="eager")

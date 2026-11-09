@@ -1361,7 +1361,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     # https://github.com/pytorch/pytorch/issues/90552
     def test_intermediate_leaf_requires_grad(self):
         def f(x):
-            leaf = torch.ones(2, requires_grad=True)
+            leaf = torch.ones(2, requires_grad=True, device=x.device)
             return leaf, leaf * 2
 
         f_compiled = torch.compile(f, backend="aot_eager")
@@ -2250,7 +2250,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             )
 
             tensors = [
-                torch.empty(shape, dtype=dtype).fill_(17)
+                torch.empty(shape, dtype=dtype, device=device_type).fill_(17)
                 for shape, dtype in itertools.product(shapes, dtypes)
             ]
 
@@ -2263,10 +2263,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 y_np = y.cpu().numpy() if isinstance(y, torch.Tensor) else y
                 return torch.from_numpy(
                     np.where(condition.cpu().numpy(), x_np, y_np)
-                ).to(common_dtype)
+                ).to(device=condition.device, dtype=common_dtype)
 
             for x, y in zip(x_vals, y_vals):
-                condition = torch.empty(*condition_shape, dtype=torch.bool).bernoulli_()
+                condition = torch.empty(
+                    *condition_shape, dtype=torch.bool, device=device_type
+                ).bernoulli_()
                 common_dtype = torch.result_type(x, y)
 
                 def check_equal(condition, x, y):
