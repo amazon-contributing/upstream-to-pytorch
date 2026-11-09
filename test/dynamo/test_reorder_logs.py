@@ -365,7 +365,11 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
             printed_output = mock_stdout.getvalue().strip()
             orig_out = f(*inputs)
 
-        self.assertEqual(printed_output, "tensor([2])\ntensor([1])")
+        expected = (
+            f"{torch.tensor([2], device=device_type)}\n"
+            f"{torch.tensor([1], device=device_type)}"
+        )
+        self.assertEqual(printed_output, expected)
         self.assertTrue(same(orig_out, opt_out))
 
         graph_break_key = counters["graph_break"].keys()
