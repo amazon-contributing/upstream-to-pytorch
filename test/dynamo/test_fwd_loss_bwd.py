@@ -6,6 +6,9 @@ import sys
 import textwrap
 
 import torch
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 import torch._dynamo
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -682,8 +685,8 @@ class <lambda>(torch.nn.Module):
             # Return loss - with retain_graph=True, loss can still be backwarded
             return loss, grad_weight
 
-        x = torch.randn(2, 4, requires_grad=True)
-        weight = torch.randn(4, 3, requires_grad=True)
+        x = torch.randn(2, 4, requires_grad=True, device=device_type)
+        weight = torch.randn(4, 3, requires_grad=True, device=device_type)
 
         x_eager = x.clone().detach().requires_grad_(True)
         weight_eager = weight.clone().detach().requires_grad_(True)
@@ -763,9 +766,9 @@ autograd.grad with external grad_fn
 
     @skipIfCrossRef
     def test_autograd_grad_manual_update_matches_eager(self):
-        mod_eager = torch.nn.Linear(4, 4)
+        mod_eager = torch.nn.Linear(4, 4).to(device_type)
         mod_compiled = copy.deepcopy(mod_eager)
-        x = torch.randn(2, 4)
+        x = torch.randn(2, 4, device=device_type)
 
         def step_fn(mod):
             res = mod(x)
@@ -1466,8 +1469,8 @@ class GraphModule(torch.nn.Module):
 
     @skipIfCrossRef
     def test_tensor_backward_preserves_existing_grad_reference(self):
-        mod = torch.nn.Linear(4, 4)
-        x = torch.randn(2, 4)
+        mod = torch.nn.Linear(4, 4).to(device_type)
+        x = torch.randn(2, 4, device=device_type)
 
         def fn(x):
             loss = mod(x).sum()
@@ -1600,8 +1603,8 @@ backward() with in-graph created tensor
         In eager mode, backward([x, x]) doesn't double-accumulate gradients.
         Our dynamo rewrite must match this behavior by deduplicating inputs.
         """
-        mod = torch.nn.Linear(4, 4)
-        x = torch.randn(2, 4)
+        mod = torch.nn.Linear(4, 4).to(device_type)
+        x = torch.randn(2, 4, device=device_type)
 
         def fn(x):
             res = mod(x)
