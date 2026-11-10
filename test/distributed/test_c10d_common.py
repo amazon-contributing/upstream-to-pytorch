@@ -90,6 +90,7 @@ def tearDownModule():
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
+
 class MultiProcContinuousSkipTest(MultiProcContinuousTest):
     world_size = 2
 
@@ -114,6 +115,7 @@ def devices_for_rank(world_size):
     """Tests are designed to simulate multi nodes with multi
     devices on each node. The backend requires equal #devices in each process.
     On a single node, all visible devices are evenly
+    divided to subsets, each process only uses a subset.
     """
     device_count = torch.accelerator.device_count()
     visible_devices = list(range(device_count))
@@ -121,28 +123,16 @@ def devices_for_rank(world_size):
     devices = []
     for rank in range(world_size):
         devices.append(
-            visible_devices[rank * devices_per_process : (rank + 1) * devices_per_process]
+            visible_devices[
+                rank * devices_per_process : (rank + 1) * devices_per_process
+            ]
         )
     return devices
 
-class MultiProcContinuousSkipTest(MultiProcContinuousTest):
-    world_size = 2
 
-    @classmethod
-    def backend_str(cls) -> str:
-        return "gloo"
+# Upstream's name, kept so unmodified upstream tests (test_c10d_nccl.py) import.
+gpus_for_rank = devices_for_rank
 
-    @classmethod
-    def device_type(cls) -> str:
-        return "cpu"
-
-    def test_1_worker_skip(self) -> None:
-        self.skipTest("skip from worker")
-
-    def test_2_worker_continues_after_skip(self) -> None:
-        tensor = torch.tensor(self.rank + 1)
-        dist.all_reduce(tensor)
-        self.assertEqual(tensor, 3)
 
 class AbstractTimeoutTest:
     def _test_store_timeout(self, backend, init_method, c2p):
