@@ -92,7 +92,7 @@ class TestZeroRedundancyOptimizerSingleRank(MultiProcContinuousTest):
 
     @classmethod
     def backend_str(cls):
-        return {"cuda": "nccl", "hpu": "hccl", "xpu": "xccl"}.get(device_type, "gloo")
+        return dist.get_default_backend_for_device(device_type)
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):

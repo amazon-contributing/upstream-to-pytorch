@@ -15,7 +15,6 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    DEVICE_TYPE,
     DEVICEInitMode,
     FSDPInitMode,
     FSDPTestContinuous,
@@ -39,6 +38,8 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 @dataclass
@@ -134,7 +135,7 @@ class TestGradAcc(FSDPTestContinuous):
             deterministic=True,
             add_bn=False,  # disable BN since the test uses varying batch sizes
         )
-        device = torch.device("cuda")
+        device = torch.device(device_type)
         optim = torch.optim.SGD(
             fsdp_model.parameters(),
             lr=0.01,
