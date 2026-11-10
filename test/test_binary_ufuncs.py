@@ -1637,7 +1637,10 @@ class TestBinaryUfuncsDevice(TestCase):
             device_type = torch.device(device).type
             unsupported = get_unsupported_dtypes_for_device(device_type)
             backend_supports_complex = torch.complex64 not in unsupported
-            if will_raise_error:
+            # A backend without complex support skips the BFloat16 check below.
+            if will_raise_error and (
+                dtype != torch.bfloat16 or backend_supports_complex
+            ):
                 # On CPU, Half/BFloat16 Tensor with complex exponents leads to
                 # computation dtype of ComplexHalf/BComplex32 for which this ops is not
                 # supported yet

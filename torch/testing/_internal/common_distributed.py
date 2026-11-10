@@ -1394,7 +1394,10 @@ class DistributedTestBase(MultiProcessTestCase):
         elif "xpu" in device:
             return "xccl"
         else:
-            return "gloo"
+            # Use the backend that the device registered, for example an
+            # out-of-tree accelerator. Fall back to gloo.
+            device_type = torch.device(device).type if isinstance(device, str) else device.type
+            return c10d.Backend.default_device_backend_map.get(device_type, "gloo")
 
     def create_pg(self, device, world_size=None, backend=None):
         if world_size is None:

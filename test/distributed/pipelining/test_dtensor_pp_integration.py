@@ -168,8 +168,8 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
         return torch.device(device_type, self.rank)
 
     def init_pg(self) -> None:
-        if device_type == "cuda":
-            torch.cuda.set_device(self.device)
+        if device_type != "cpu":
+            torch.get_device_module(device_type).set_device(self.device)
 
     def _make_mesh(self) -> DeviceMesh:
         return init_device_mesh(device_type, (2, 2), mesh_dim_names=("pp", "tp"))

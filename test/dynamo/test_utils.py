@@ -442,12 +442,12 @@ class TestDynamoTimed(TestCase):
         if hasattr(torch._dynamo, "reset_recompile_user_contexts"):
             torch._dynamo.reset_recompile_user_contexts()
 
-    def run_forward_backward(self):
-        model = torch.compile(TestModel().to(device_type))
-        x = torch.rand([3], requires_grad=True, device=device_type)
+    def run_forward_backward(self, device=device_type):
+        model = torch.compile(TestModel().to(device))
+        x = torch.rand([3], requires_grad=True, device=device)
         output = model(x)
         loss_fn = torch.nn.MSELoss()
-        target = torch.tensor([1.0], device=device_type)
+        target = torch.tensor([1.0], device=device)
         loss = loss_fn(output, target)
         loss.backward()
 

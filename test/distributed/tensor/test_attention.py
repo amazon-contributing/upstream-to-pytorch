@@ -107,7 +107,7 @@ class SDPAWrapper(torch.nn.Module):
 class RingAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        return torch.cuda.device_count()
+        return torch.accelerator.device_count()
 
     @property
     def destroy_pg_upon_exit(self) -> bool:

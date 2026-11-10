@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     slowTest,
     TEST_CUDA,
     TEST_NUMPY,
+    TEST_PRIVATEUSE1,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
     TestCase,
@@ -103,6 +104,12 @@ TEST_CUDA_IPC = (
     and not IS_JETSON
     #    and not TEST_WITH_ROCM
 )  # https://github.com/pytorch/pytorch/issues/90940
+
+TEST_PRIVATEUSE1_IPC = (
+    TEST_PRIVATEUSE1
+    and sys.platform != "darwin"
+    and sys.platform != "win32"
+)
 
 # pin_memory requires an accelerator with a pinned memory allocator.
 # MPS reports as available but does not support pin_memory (see
@@ -2969,7 +2976,7 @@ class TestDataLoaderDevice(TestCase):
         "context",
         [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
     )
-    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @unittest.skipIf(not (TEST_CUDA_IPC or TEST_PRIVATEUSE1_IPC), "CUDA/PrivateUse1 IPC not available")
     def test_nested_tensor_multiprocessing(self, device, context):
         # The 'fork' multiprocessing context doesn't work for CUDA so skip it
         if "cuda" in device and context == "fork":

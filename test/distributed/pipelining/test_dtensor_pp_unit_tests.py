@@ -102,8 +102,8 @@ class TestDTensorPPUnitTests(MultiProcContinuousTest):
         return torch.device(device_type, self.rank)
 
     def init_pg(self):
-        if device_type == "cuda":
-            torch.cuda.set_device(self.device)
+        if device_type != "cpu":
+            torch.get_device_module(device_type).set_device(self.device)
 
     # -----------------------------------------------------------------
     # Shared helpers

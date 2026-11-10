@@ -20274,7 +20274,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             opt_fn2 = torch.compile(fn2, backend="eager", fullgraph=True)
             res = opt_fn2(x2)
 
-    @onlyCUDA
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @torch._dynamo.config.patch(recompile_limit=999)
     def test_legacy_cuda_tensor(self, device):
         typs = [

@@ -35,7 +35,7 @@ class DummyModule(torch.nn.Module):
 
 class TensorParallelAPITests(DTensorContinuousTestBase):
     _gpu_num = torch.accelerator.device_count()
-    world_size = _gpu_num if _gpu_num % 2 == 0 and _gpu_num > 4 else 4
+    world_size = min(_gpu_num if _gpu_num % 2 == 0 and _gpu_num > 4 else 4, 8)
 
     def _compare_params(
         self,

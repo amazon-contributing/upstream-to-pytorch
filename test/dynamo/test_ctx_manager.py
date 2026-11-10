@@ -2990,7 +2990,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float16)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     def test_autocast_arguments_binding(self):
         def f1(x):
             with torch.autocast(device_type="cuda", enabled=False):
@@ -4279,7 +4279,7 @@ class GraphModule(torch.nn.Module):
             y = ctx.__enter__()
             return x + y, ctx
 
-        x = torch.tensor([1.0])
+        x = torch.tensor([1.0], device=device_type)
         expected = fn(x)
         result = torch.compile(fn, backend="eager", fullgraph=False)(x)
         self.assertEqual(expected[0], result[0])
