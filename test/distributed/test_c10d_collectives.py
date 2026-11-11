@@ -906,11 +906,34 @@ class AbstractCollectivesTest(C10dBackendTest):
                                 )
 
     def test_noncontiguous_all_to_all_error(self):
+        if self.supports_noncontiguous_all_to_all:
+            self.skipTest(
+                f"{self.backend_name} accepts a non-contiguous all_to_all input"
+            )
         self._init_pg()
         input = torch.ones(self.world_size, self.world_size, device=self.device).t()
         output = torch.empty_like(input.contiguous())
         with self.assertRaisesRegex(ValueError, "Tensors must be contiguous"):
             dist.all_to_all_single(output, input)
+
+    def test_noncontiguous_all_to_all(self):
+        if not self.supports_noncontiguous_all_to_all:
+            self.skipTest(f"{self.backend_name} requires a contiguous all_to_all input")
+        self._init_pg()
+        n = self.world_size
+
+        def make_input(rank):
+            base = torch.arange(n * n, dtype=torch.float32, device=self.device)
+            return (base.reshape(n, n) + 100 * rank).t()
+
+        input = make_input(self.rank)
+        self.assertFalse(input.is_contiguous())
+        output = torch.empty(n, n, dtype=torch.float32, device=self.device)
+        dist.all_to_all_single(output, input)
+        expected = torch.stack(
+            [make_input(source).contiguous()[self.rank] for source in range(n)]
+        )
+        self.assertEqual(output, expected)
 
     def test_mismatched_dtypes(self):
         self._init_pg()
