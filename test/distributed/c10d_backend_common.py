@@ -50,6 +50,9 @@ class BackendConfig:
     supports_work_result: bool = False
     supports_gather_single: bool = False
     supports_uneven_all_gather: bool = False
+    # True when all_to_all_single accepts a non-contiguous input instead of
+    # raising "Tensors must be contiguous" like Gloo and NCCL.
+    supports_noncontiguous_all_to_all: bool = False
     dtypes: tuple[torch.dtype, ...] = STANDARD_DTYPES
     float8_dtypes: tuple[torch.dtype, ...] = ()
     premul_sum_dtypes: tuple[torch.dtype, ...] = ()
@@ -158,6 +161,12 @@ if dist.is_available() and dist.is_backend_available("neuron"):
             # False: allgather sizes its staging tensor from output_list[0]
             # (NeuronBackend.cpp:989-991), so uneven outputs are not supported.
             supports_uneven_all_gather=False,
+            # True: all_to_all_single accepts a strided input and returns the
+            # result of its contiguous copy. torch-neuronx tests this in
+            # tests/distributed/collective_ops/test_strided_collectives.py
+            # (TestStridedAllToAll.test_all_to_all_single_strided_input);
+            # context-parallel and MoE code pass strided views.
+            supports_noncontiguous_all_to_all=True,
             # All standard dtypes are accepted. f32, f16, bf16, int32 and bool
             # are used as is; f64 is cast to f32, and int64, int8 and uint8 to
             # int32 (DispatchUtils.cpp:227-241, 357; copy-back at
@@ -304,6 +313,9 @@ def instantiate_backend_tests(
                 "supports_work_result": backend.supports_work_result,
                 "supports_gather_single": backend.supports_gather_single,
                 "supports_uneven_all_gather": backend.supports_uneven_all_gather,
+                "supports_noncontiguous_all_to_all": (
+                    backend.supports_noncontiguous_all_to_all
+                ),
                 "dtypes": backend.dtypes,
                 "float8_dtypes": backend.float8_dtypes,
                 "premul_sum_dtypes": backend.premul_sum_dtypes,
