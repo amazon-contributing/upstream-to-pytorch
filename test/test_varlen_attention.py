@@ -1763,7 +1763,7 @@ class TestVarlenAttention(NNTestCase):
             self.assertEqual(out_buf, out)
 
 
-device_types = ("cuda",)
+device_types = ("cuda", "privateuse1")
 
 instantiate_device_type_tests(TestVarlenAttention, globals(), only_for=device_types)
 
