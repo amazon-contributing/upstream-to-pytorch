@@ -73,6 +73,11 @@ elif TEST_XPU:
     DEVICE = "xpu"
 elif TEST_CUDA:
     devices.append("cuda")
+elif acc := torch.accelerator.current_accelerator(check_available=True):
+    # Any other accelerator, for example an out-of-tree backend. Only the accelerator-only
+    # tests use it. The threaded tests keep to CPU, because they need one process to use
+    # several devices.
+    DEVICE = acc.type
 
 
 def new_subgroups(group_size: int, pg_tag=None):
@@ -721,6 +726,119 @@ class TestDistributedBackendCollectivesWithWorldSize4(
             )
 
 
+class TestTraceableCollectivesWithDistributedBackend(DistributedTestBase):
+    """The accelerator version of TestTraceableCollectives.
+
+    TestTraceableCollectives runs every rank as a thread of one process. That needs one
+    process to use several devices. Here each rank is a process with its own device.
+    """
+
+    @property
+    def world_size(self):
+        return 4
+
+    @with_comms()
+    def test_broadcast(self, device):
+        exit_if_lt_x_accelerators(self.world_size)
+        if dist.get_rank() == 0:
+            tensor = torch.ones([4], device=device)
+        else:
+            tensor = torch.zeros([4], device=device)
+
+        mesh = dt.DeviceMesh(device, torch.arange(4))
+        res = ft_c.broadcast(tensor, 0, mesh)
+        self.assertEqual(res, torch.ones([4], device=device))
+
+    @with_comms()
+    def test_all_reduce_eager(self, device):
+        exit_if_lt_x_accelerators(self.world_size)
+        tensor = torch.ones([4], device=device)
+        mesh = dt.DeviceMesh(device, torch.arange(4))
+
+        res = ft_c.all_reduce(tensor, "sum", mesh)
+        self.assertEqual(res, torch.tensor([4, 4, 4, 4], dtype=torch.float))
+
+        mesh = dt.DeviceMesh(device, torch.arange(4).view(2, 2))
+        res2 = ft_c.all_reduce(tensor, "sum", (mesh, 1))
+        self.assertEqual(res2, torch.tensor([2, 2, 2, 2], dtype=torch.float))
+
+    @with_comms()
+    def test_all_reduce_coalesced_eager(self, device):
+        exit_if_lt_x_accelerators(self.world_size)
+        t0 = torch.ones([4], device=device)
+        t1 = torch.ones([6], device=device) + 2
+        mesh = dt.DeviceMesh(device, torch.arange(4))
+
+        res = ft_c.all_reduce_coalesced([t0, t1], "sum", mesh)
+        self.assertEqual(res[0], t0 * 4)
+        self.assertEqual(res[1], t1 * 4)
+
+    @with_comms()
+    def test_all_gather_tensor(self, device):
+        exit_if_lt_x_accelerators(self.world_size)
+        # testing 1d/2d mesh
+        mesh_1d = dt.DeviceMesh(device, torch.arange(self.world_size))
+        mesh_2d = dt.DeviceMesh(device, torch.arange(self.world_size).view(2, 2))
+        for mesh in [mesh_1d, mesh_2d]:
+            dims_to_gather = [0, 1, 2]
+            for dim in dims_to_gather:
+                output_size = [3, 3, 3]
+                output_size[dim] *= mesh.size(0)
+                # each rank have its own tensor, all_gather gives a bigger tensor
+                local_tensor = torch.ones([3, 3, 3], device=device)
+                gathered_tensor = ft_c.all_gather_single(
+                    local_tensor, gather_dim=dim, group=(mesh, 0)
+                )
+                self.assertEqual(gathered_tensor, torch.ones(output_size))
+
+    @with_comms()
+    def test_all_gather_into_tensor_coalesced(self, device):
+        exit_if_lt_x_accelerators(self.world_size)
+        tensors = [torch.ones([4], device=device), torch.ones([4], device=device) + 1]
+        mesh = dt.DeviceMesh(device, torch.arange(4))
+
+        res = ft_c.all_gather_single_coalesced(tensors, mesh)
+        self.assertEqual(2, len(res))
+        self.assertEqual(torch.ones([4 * dist.get_world_size()], device=device), res[0])
+        self.assertEqual(
+            torch.ones([4 * dist.get_world_size()], device=device) + 1, res[1]
+        )
+
+    @with_comms()
+    def test_reduce_scatter_tensor(self, device):
+        exit_if_lt_x_accelerators(self.world_size)
+        # testing 1d/2d mesh
+        mesh_1d = dt.DeviceMesh(device, torch.arange(self.world_size))
+        mesh_2d = dt.DeviceMesh(device, torch.arange(self.world_size).view(2, 2))
+        for mesh in [mesh_1d, mesh_2d]:
+            dims_to_scatter = [0, 1]
+            for dim in dims_to_scatter:
+                group_size = mesh.size(0)
+                input_size = [3, 3]
+                output_size = [3, 3]
+                output_size[dim] *= group_size
+                input_tensor = torch.ones(output_size, device=device)
+                res_num = 1 * group_size
+                rs_tensor = ft_c.reduce_scatter_single(
+                    input_tensor, "sum", scatter_dim=dim, group=(mesh, 0)
+                )
+                self.assertEqual(rs_tensor, torch.ones(input_size) * res_num)
+
+    @with_comms()
+    def test_reduce_scatter_into_tensor_coalesced(self, device):
+        exit_if_lt_x_accelerators(self.world_size)
+        tensors = [
+            torch.ones([4], dtype=torch.int64, device=device),
+            torch.ones([4], dtype=torch.int64, device=device) + 1,
+        ]
+        mesh = dt.DeviceMesh(device, torch.arange(4))
+
+        res = ft_c.reduce_scatter_single_coalesced(tensors, "sum", [0, 0], mesh)
+        self.assertEqual(2, len(res))
+        self.assertEqual(torch.tensor([4], device=device), res[0])
+        self.assertEqual(torch.tensor([8], device=device), res[1])
+
+
 class TestFunctionalAutograd(TestCase):
     def setUp(self):
         super().setUp()
@@ -842,6 +960,12 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestDistributedBackendCollectivesWithWorldSize4,
+    globals(),
+    only_for=DEVICE,
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestTraceableCollectivesWithDistributedBackend,
     globals(),
     only_for=DEVICE,
     allow_xpu=True,
