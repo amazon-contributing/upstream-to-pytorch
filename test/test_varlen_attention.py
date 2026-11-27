@@ -2641,7 +2641,7 @@ class TestVarlenAttention(NNTestCase):
             self.assertEqual(out_buf, out)
 
 
-instantiate_device_type_tests(TestVarlenAttention, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestVarlenAttention, globals(), only_for=("cuda", "privateuse1"))
 
 if __name__ == "__main__":
     run_tests()
